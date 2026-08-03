@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gallery — VUMCA hITECH Computing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <nav class="nav">
+    <a href="index.html" class="logo">
+      <span class="logo-icon">◈</span>
+      VUMCA <span class="accent">hITECH</span> Computing
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html#about">About</a></li>
+      <li><a href="index.html#courses">Courses</a></li>
+      <li><a href="index.html#schedule">Schedule</a></li>
+      <li><a href="index.html#labs">Labs</a></li>
+      <li><a href="gallery.html" class="active-link">Gallery</a></li>
+      <li><a href="index.html#contact" class="nav-cta">Enroll</a></li>
+    </ul>
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <main class="gallery-page">
+    <header class="gallery-hero">
+      <span class="section-tag">// VISUAL ARCHIVE</span>
+      <h1>Gallery</h1>
+      <p>Moments from our labs, workshops, and campus life.</p>
+      <button class="btn btn-ghost gallery-shuffle" id="shuffleBtn">Shuffle Photos</button>
+    </header>
+
+    <section class="gallery-grid" id="galleryGrid" aria-label="Photo gallery">
+      <!-- Photos injected by script -->
+    </section>
+  </main>
+
+  <div class="lightbox" id="lightbox" aria-hidden="true">
+    <button class="lightbox-close" id="lightboxClose" aria-label="Close">&times;</button>
+    <button class="lightbox-nav lightbox-prev" id="lightboxPrev" aria-label="Previous">&#8249;</button>
+    <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <button class="lightbox-nav lightbox-next" id="lightboxNext" aria-label="Next">&#8250;</button>
+    <p class="lightbox-caption" id="lightboxCaption"></p>
+  </div>
+
+  <footer class="footer">
+    <div class="footer-content">
+      <a href="index.html" class="logo">
+        <span class="logo-icon">◈</span>
+        VUMCA <span class="accent">hITECH</span> Computing
+      </a>
+      <p class="footer-copy">&copy; 2026 VUMCA hITECH Computing. All systems operational.</p>
+      <div class="footer-links">
+        <a href="index.html#about">About</a>
+        <a href="index.html#courses">Courses</a>
+        <a href="gallery.html">Gallery</a>
+        <a href="index.html#contact">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+  <script src="gallery.js"></script>
+</body>
+</html>

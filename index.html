@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VUMCA hITECH Computing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <nav class="nav">
+    <a href="index.html" class="logo">
+      <span class="logo-icon">◈</span>
+      VUMCA <span class="accent">hITECH</span> Computing
+    </a>
+    <ul class="nav-links">
+      <li><a href="#about">About</a></li>
+      <li><a href="#courses">Courses</a></li>
+      <li><a href="#schedule">Schedule</a></li>
+      <li><a href="#labs">Labs</a></li>
+      <li><a href="gallery.html">Gallery</a></li>
+      <li><a href="#contact" class="nav-cta">Enroll</a></li>
+    </ul>
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-content">
+      <p class="hero-tag">// SYSTEM ONLINE — CLASS 2026</p>
+      <h1>
+        <span class="line">Master the</span>
+        <span class="line glow">Digital Frontier</span>
+      </h1>
+      <p class="hero-desc">
+        Advanced computer science education for the next generation of innovators.
+        Code, build, and deploy in state-of-the-art cyber labs.
+      </p>
+      <div class="hero-actions">
+        <a href="#courses" class="btn btn-primary">Explore Courses</a>
+        <a href="#about" class="btn btn-ghost">Learn More</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-value" data-target="12">0</span>
+          <span class="stat-label">Courses</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" data-target="500">0</span>
+          <span class="stat-label">Students</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" data-target="98">0</span>
+          <span class="stat-label">Success Rate %</span>
+        </div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+          <span class="terminal-title">vumca@hitech:~</span>
+        </div>
+        <div class="terminal-body">
+          <p><span class="prompt">$</span> vumca init --student</p>
+          <p class="output">Initializing learning environment...</p>
+          <p class="output success">✓ Python 3.12 ready</p>
+          <p class="output success">✓ Web Dev stack loaded</p>
+          <p class="output success">✓ AI/ML modules active</p>
+          <p><span class="prompt">$</span> <span class="cursor-blink">_</span></p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section id="about" class="section about">
+    <div class="section-header">
+      <span class="section-tag">01 // ABOUT</span>
+      <h2>Built for Future Engineers</h2>
+      <p>Where cutting-edge curriculum meets hands-on innovation.</p>
+    </div>
+    <div class="about-grid">
+      <article class="card">
+        <div class="card-icon">⬡</div>
+        <h3>Modern Curriculum</h3>
+        <p>Industry-aligned courses covering programming, cybersecurity, AI, and cloud computing.</p>
+      </article>
+      <article class="card">
+        <div class="card-icon">◉</div>
+        <h3>Cyber Labs</h3>
+        <p>High-performance workstations, VR setups, and dedicated server rooms for real projects.</p>
+      </article>
+      <article class="card">
+        <div class="card-icon">◎</div>
+        <h3>Expert Mentors</h3>
+        <p>Learn from engineers and researchers with decades of combined industry experience.</p>
+      </article>
+      <article class="card">
+        <div class="card-icon">◈</div>
+        <h3>Project Portfolio</h3>
+        <p>Graduate with a portfolio of deployed apps, open-source contributions, and certifications.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="courses" class="section courses">
+    <div class="section-header">
+      <span class="section-tag">02 // COURSES</span>
+      <h2>Learning Modules</h2>
+      <p>Select your path through the digital ecosystem.</p>
+    </div>
+    <div class="course-list">
+      <article class="course-card">
+        <span class="course-level">Foundation</span>
+        <h3>Intro to Programming</h3>
+        <p>Python fundamentals, algorithms, and problem-solving techniques.</p>
+        <ul class="course-meta">
+          <li>12 weeks</li>
+          <li>Beginner</li>
+        </ul>
+      </article>
+      <article class="course-card featured">
+        <span class="course-badge">Popular</span>
+        <span class="course-level">Core</span>
+        <h3>Full-Stack Web Dev</h3>
+        <p>HTML, CSS, JavaScript, React, Node.js, and database design.</p>
+        <ul class="course-meta">
+          <li>16 weeks</li>
+          <li>Intermediate</li>
+        </ul>
+      </article>
+      <article class="course-card">
+        <span class="course-level">Advanced</span>
+        <h3>AI & Machine Learning</h3>
+        <p>Neural networks, data science, TensorFlow, and model deployment.</p>
+        <ul class="course-meta">
+          <li>14 weeks</li>
+          <li>Advanced</li>
+        </ul>
+      </article>
+      <article class="course-card">
+        <span class="course-level">Security</span>
+        <h3>Cybersecurity</h3>
+        <p>Ethical hacking, network defense, cryptography, and incident response.</p>
+        <ul class="course-meta">
+          <li>10 weeks</li>
+          <li>Intermediate</li>
+        </ul>
+      </article>
+      <article class="course-card">
+        <span class="course-level">Systems</span>
+        <h3>Cloud & DevOps</h3>
+        <p>AWS, Docker, Kubernetes, CI/CD pipelines, and infrastructure as code.</p>
+        <ul class="course-meta">
+          <li>12 weeks</li>
+          <li>Advanced</li>
+        </ul>
+      </article>
+      <article class="course-card">
+        <span class="course-level">Creative</span>
+        <h3>Game Development</h3>
+        <p>Unity, C#, 3D modeling, game physics, and interactive design.</p>
+        <ul class="course-meta">
+          <li>14 weeks</li>
+          <li>Intermediate</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="schedule" class="section schedule">
+    <div class="section-header">
+      <span class="section-tag">03 // SCHEDULE</span>
+      <h2>Weekly Timetable</h2>
+      <p>Structured sessions designed for maximum retention.</p>
+    </div>
+    <div class="schedule-table-wrap">
+      <table class="schedule-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Mon</th>
+            <th>Tue</th>
+            <th>Wed</th>
+            <th>Thu</th>
+            <th>Fri</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>09:00</td>
+            <td>Programming</td>
+            <td>Web Dev</td>
+            <td>Programming</td>
+            <td>AI/ML</td>
+            <td>Lab Session</td>
+          </tr>
+          <tr>
+            <td>11:00</td>
+            <td>Algorithms</td>
+            <td>Web Dev</td>
+            <td>Cybersecurity</td>
+            <td>AI/ML</td>
+            <td>Project Work</td>
+          </tr>
+          <tr>
+            <td>14:00</td>
+            <td>Lab</td>
+            <td>Cloud</td>
+            <td>Lab</td>
+            <td>Game Dev</td>
+            <td>Review</td>
+          </tr>
+          <tr>
+            <td>16:00</td>
+            <td colspan="5" class="highlight-cell">Open Hack Hours — All Labs Available</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="labs" class="section labs">
+    <div class="section-header">
+      <span class="section-tag">04 // FACILITIES</span>
+      <h2>Command Center Labs</h2>
+      <p>Enterprise-grade hardware in a futuristic learning environment.</p>
+    </div>
+    <div class="labs-showcase">
+      <div class="lab-item">
+        <div class="lab-number">01</div>
+        <h3>Code Forge</h3>
+        <p>40 dual-monitor dev stations with Linux & Windows dual-boot.</p>
+      </div>
+      <div class="lab-item">
+        <div class="lab-number">02</div>
+        <h3>Neural Net Studio</h3>
+        <p>GPU clusters for AI training and data visualization projects.</p>
+      </div>
+      <div class="lab-item">
+        <div class="lab-number">03</div>
+        <h3>Secure Zone</h3>
+        <p>Isolated network for penetration testing and security drills.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="section contact">
+    <div class="contact-wrapper">
+      <div class="contact-info">
+        <span class="section-tag">05 // ENROLL</span>
+        <h2>Initialize Your Journey</h2>
+        <p>Ready to join the next cohort? Submit your application and we'll contact you within 48 hours.</p>
+        <div class="contact-details">
+          <p><strong>Location:</strong> Sector 7, Tech District</p>
+          <p><strong>Email:</strong> enroll@vumcahitech.io</p>
+          <p><strong>Phone:</strong> +1 (555) 014-2077</p>
+        </div>
+      </div>
+      <form class="contact-form" id="enrollForm">
+        <div class="form-group">
+          <label for="name">Full Name</label>
+          <input type="text" id="name" name="name" required placeholder="Enter your name">
+        </div>
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required placeholder="you@email.com">
+        </div>
+        <div class="form-group">
+          <label for="course">Preferred Course</label>
+          <select id="course" name="course" required>
+            <option value="">Select a course</option>
+            <option value="programming">Intro to Programming</option>
+            <option value="webdev">Full-Stack Web Dev</option>
+            <option value="ai">AI & Machine Learning</option>
+            <option value="security">Cybersecurity</option>
+            <option value="cloud">Cloud & DevOps</option>
+            <option value="gamedev">Game Development</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="message">Message</label>
+          <textarea id="message" name="message" rows="4" placeholder="Tell us about your goals..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Submit Application</button>
+      </form>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-content">
+      <a href="index.html" class="logo">
+        <span class="logo-icon">◈</span>
+        VUMCA <span class="accent">hITECH</span> Computing
+      </a>
+      <p class="footer-copy">&copy; 2026 VUMCA hITECH Computing. All systems operational.</p>
+      <div class="footer-links">
+        <a href="#about">About</a>
+        <a href="#courses">Courses</a>
+        <a href="gallery.html">Gallery</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
