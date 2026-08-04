@@ -37,11 +37,29 @@ The SQLite file is created automatically at `data/lms.db` and seeded on first ru
 ## Features
 
 - **Login** — separate admin / student portals with session auth
-- **Admin console** — dashboard stats, manage students, courses, enrollments,
-  assignments (with submission grading), quizzes (builder + auto-grading), daily
-  attendance (present / late / absent)
+- **Admin console** — dashboard stats, manage students (including mobile number),
+  courses, enrollments, assignments (with submission grading), quizzes (builder +
+  auto-grading), daily attendance (present / late / absent)
+- **AI quiz generation** — generate multiple-choice quiz questions from a topic
+  using an OpenAI-compatible LLM API
 - **Student portal** — view courses, submit assignments, take quizzes with
   instant scores, attendance log, and grades
+
+## AI quiz generation (optional)
+
+In the quiz builder, use "⚡ Generate with AI" to auto-create questions. The app
+calls an OpenAI-compatible chat API using **your own** credentials, provided via
+environment variables (never bundled or read from the platform). Copy `.env.example`
+to `.env` (or set variables in your hosting panel):
+
+```env
+USER_LLM_API_KEY=your-api-key-here
+USER_LLM_BASE_URL=https://api.deepseek.com/v1   # any OpenAI-compatible endpoint
+USER_LLM_MODEL=deepseek-chat
+```
+
+Works with DeepSeek, OpenAI, Groq, and other OpenAI-compatible providers. Without
+a key, the button shows "NOT CONFIGURED" and returns a clear message.
 
 ## Deploying on Hostinger (shared Node.js hosting)
 

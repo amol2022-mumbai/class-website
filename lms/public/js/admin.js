@@ -99,6 +99,7 @@ async function loadStudents() {
       <td><span class="badge badge-cyan">${esc(s.username)}</span></td>
       <td><strong>${esc(s.name)}</strong></td>
       <td class="muted">${esc(s.email || '—')}</td>
+      <td class="muted">${esc(s.mobile || '—')}</td>
       <td>${s.course_count}</td>
       <td>${s.present_days}</td>
       <td class="table-actions">
@@ -106,7 +107,7 @@ async function loadStudents() {
         <button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id}, '${esc(s.name)}')">DELETE</button>
       </td>
     </tr>
-  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
+  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
 }
 
 function openStudentModal(student) {
@@ -128,9 +129,13 @@ function openStudentModal(student) {
           <input type="text" name="password" required placeholder="Initial password">
         </div>
         `}
-        <div class="field span-2">
+        <div class="field">
           <label>Email</label>
           <input type="email" name="email" value="${esc(student ? student.email || '' : '')}" placeholder="student@example.com">
+        </div>
+        <div class="field">
+          <label>Mobile Number</label>
+          <input type="tel" name="mobile" value="${esc(student ? student.mobile || '' : '')}" placeholder="e.g. +91 98765 43210">
         </div>
         ${isEdit ? `
         <div class="field span-2">
@@ -148,7 +153,7 @@ function openStudentModal(student) {
   document.getElementById('studentForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const payload = { name: f.get('name'), email: f.get('email') };
+    const payload = { name: f.get('name'), email: f.get('email'), mobile: f.get('mobile') };
     try {
       if (isEdit) {
         if (f.get('password')) payload.password = f.get('password');
@@ -156,7 +161,7 @@ function openStudentModal(student) {
       } else {
         await api('/api/admin/students', { method: 'POST', body: {
           username: f.get('username'), password: f.get('password'),
-          name: f.get('name'), email: f.get('email'),
+          name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'),
         }});
       }
       toast(isEdit ? 'Student updated' : 'Student created');
@@ -511,7 +516,38 @@ function renderQuizForm(quiz, questions) {
       </div>
       <div class="panel-header" style="margin-top:6px">
         <h2>Questions</h2>
-        <button type="button" class="btn btn-ghost btn-small" onclick="addQuestion()">+ ADD QUESTION</button>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-ghost btn-small" onclick="toggleAiPanel()">⚡ GENERATE WITH AI</button>
+          <button type="button" class="btn btn-ghost btn-small" onclick="addQuestion()">+ ADD QUESTION</button>
+        </div>
+      </div>
+      <div class="panel" id="aiPanel" style="display:none;margin-bottom:14px;border-color:var(--purple)">
+        <div class="panel-header" style="margin-bottom:12px">
+          <h2>AI Quiz Generator</h2>
+          <span class="badge badge-purple" id="aiStatusBadge">checking...</span>
+        </div>
+        <div class="form-grid">
+          <div class="field span-2">
+            <label>Topic</label>
+            <input type="text" id="aiTopic" placeholder="e.g. Python functions and loops">
+          </div>
+          <div class="field">
+            <label>Number of Questions</label>
+            <input type="number" id="aiCount" min="1" max="20" value="5">
+          </div>
+          <div class="field">
+            <label>Difficulty</label>
+            <select id="aiDifficulty">
+              <option>easy</option>
+              <option selected>medium</option>
+              <option>hard</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:6px">
+          <button type="button" class="btn btn-ghost" onclick="toggleAiPanel()">CANCEL</button>
+          <button type="button" class="btn btn-purple" id="aiGenerateBtn" onclick="generateQuizWithAI()">GENERATE QUESTIONS</button>
+        </div>
       </div>
       <div id="questionList"></div>
       <div class="modal-actions">
@@ -555,6 +591,50 @@ function renderQuizForm(quiz, questions) {
       loadQuizzes();
     } catch (err) { toast(err.message, true); }
   });
+}
+
+async function checkAiStatus() {
+  try {
+    const { configured } = await api('/api/admin/ai/status');
+    const badge = document.getElementById('aiStatusBadge');
+    if (badge) {
+      badge.textContent = configured ? 'AI READY' : 'NOT CONFIGURED';
+      badge.classList.toggle('badge-purple', configured);
+      badge.classList.toggle('badge-yellow', !configured);
+    }
+  } catch (_) {}
+}
+
+function toggleAiPanel() {
+  const panel = document.getElementById('aiPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block') checkAiStatus();
+}
+
+async function generateQuizWithAI() {
+  const topic = document.getElementById('aiTopic').value.trim();
+  const count = Number(document.getElementById('aiCount').value) || 5;
+  const difficulty = document.getElementById('aiDifficulty').value;
+  const btn = document.getElementById('aiGenerateBtn');
+  if (!topic) return toast('Enter a topic first', true);
+
+  btn.disabled = true;
+  btn.textContent = 'GENERATING...';
+  try {
+    const { questions } = await api('/api/admin/quizzes/generate', {
+      method: 'POST',
+      body: { topic, count, difficulty },
+    });
+    document.getElementById('questionList').innerHTML = '';
+    questions.forEach(q => addQuestion(q.text, q.options, q.correct_index));
+    toast(`AI generated ${questions.length} questions - review and publish`);
+    document.getElementById('aiPanel').style.display = 'none';
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'GENERATE QUESTIONS';
+  }
 }
 
 function addQuestion(text = '', options = ['', ''], correct = 0) {

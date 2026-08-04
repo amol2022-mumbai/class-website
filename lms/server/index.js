@@ -1,4 +1,5 @@
 const path = require('path');
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
@@ -79,7 +80,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 // ---------- Admin: students ----------
 app.get('/api/admin/students', requireAdmin, (req, res) => {
   const students = db.prepare(`
-    SELECT u.id, u.username, u.name, u.email,
+    SELECT u.id, u.username, u.name, u.email, u.mobile,
            (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) AS course_count,
            (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days
     FROM users u WHERE u.role = 'student' ORDER BY u.name
@@ -88,29 +89,29 @@ app.get('/api/admin/students', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/students', requireAdmin, (req, res) => {
-  const { username, password, name, email } = req.body || {};
+  const { username, password, name, email, mobile } = req.body || {};
   if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
     return res.status(409).json({ error: 'Username already exists' });
   }
   const hash = bcrypt.hashSync(password, 10);
   const result = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email) VALUES (?, ?, ?, ?, ?)'
-  ).run('student', username, hash, name, email || null);
+    'INSERT INTO users (role, username, password_hash, name, email, mobile) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('student', username, hash, name, email || null, mobile || null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
-  const { name, email, password } = req.body || {};
+  const { name, email, mobile, password } = req.body || {};
   const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
   if (password) {
     const hash = bcrypt.hashSync(password, 10);
-    db.prepare('UPDATE users SET name = ?, email = ?, password_hash = ? WHERE id = ?')
-      .run(name || student.name, email ?? student.email, hash, student.id);
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, password_hash = ? WHERE id = ?')
+      .run(name || student.name, email ?? student.email, mobile ?? student.mobile, hash, student.id);
   } else {
-    db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?')
-      .run(name || student.name, email ?? student.email, student.id);
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?')
+      .run(name || student.name, email ?? student.email, mobile ?? student.mobile, student.id);
   }
   res.json({ ok: true });
 });
@@ -297,6 +298,25 @@ app.put('/api/admin/quizzes/:id', requireAdmin, (req, res) => {
 app.delete('/api/admin/quizzes/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM quizzes WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// ---------- Admin: AI quiz generation ----------
+const { generateQuizQuestions, isConfigured: aiConfigured } = require('./ai');
+
+app.get('/api/admin/ai/status', requireAdmin, (req, res) => {
+  res.json({ configured: aiConfigured() });
+});
+
+app.post('/api/admin/quizzes/generate', requireAdmin, async (req, res) => {
+  const { topic, count, difficulty } = req.body || {};
+  if (!topic || !String(topic).trim()) return res.status(400).json({ error: 'A topic is required' });
+  const n = Math.min(Math.max(parseInt(count, 10) || 5, 1), 20);
+  try {
+    const questions = await generateQuizQuestions(String(topic).trim(), n, String(difficulty || 'medium'));
+    res.json({ questions });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 // ---------- Admin: attendance ----------

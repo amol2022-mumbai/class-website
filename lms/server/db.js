@@ -31,7 +31,8 @@ db.exec(`
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
-    email TEXT
+    email TEXT,
+    mobile TEXT
   );
 
   CREATE TABLE IF NOT EXISTS courses (
@@ -108,30 +109,38 @@ db.exec(`
   );
 `);
 
+// Migration for databases created before the mobile column existed.
+function migrate() {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('mobile')) {
+    db.exec('ALTER TABLE users ADD COLUMN mobile TEXT');
+  }
+}
+
 function seed() {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (userCount > 0) return;
 
   const insertUser = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO users (role, username, password_hash, name, email, mobile) VALUES (?, ?, ?, ?, ?, ?)'
   );
 
   const adminHash = bcrypt.hashSync('admin123', 10);
-  insertUser.run('admin', 'admin', adminHash, 'System Administrator', 'admin@vumcahitech.io');
+  insertUser.run('admin', 'admin', adminHash, 'System Administrator', 'admin@vumcahitech.io', '+1 555 010 0000');
 
   const studentData = [
-    ['STU001', 'Aarav Sharma', 'aarav@example.com', 'student123'],
-    ['STU002', 'Meera Patel', 'meera@example.com', 'student123'],
-    ['STU003', 'John Carter', 'john@example.com', 'student123'],
-    ['STU004', 'Lina Chen', 'lina@example.com', 'student123'],
-    ['STU005', 'Diego Morales', 'diego@example.com', 'student123'],
-    ['STU006', 'Fatima Noor', 'fatima@example.com', 'student123'],
+    ['STU001', 'Aarav Sharma', 'aarav@example.com', 'student123', '+91 98765 43210'],
+    ['STU002', 'Meera Patel', 'meera@example.com', 'student123', '+91 91234 56789'],
+    ['STU003', 'John Carter', 'john@example.com', 'student123', '+1 555 014 2001'],
+    ['STU004', 'Lina Chen', 'lina@example.com', 'student123', '+86 138 0013 8000'],
+    ['STU005', 'Diego Morales', 'diego@example.com', 'student123', '+52 55 1234 5678'],
+    ['STU006', 'Fatima Noor', 'fatima@example.com', 'student123', '+92 300 1234567'],
   ];
 
   const studentIds = [];
-  for (const [username, name, email, pass] of studentData) {
+  for (const [username, name, email, pass, mobile] of studentData) {
     const hash = bcrypt.hashSync(pass, 10);
-    const res = insertUser.run('student', username, hash, name, email);
+    const res = insertUser.run('student', username, hash, name, email, mobile);
     studentIds.push(res.lastInsertRowid);
   }
 
@@ -234,6 +243,7 @@ function seed() {
   }
 }
 
+migrate();
 seed();
 
 module.exports = db;
