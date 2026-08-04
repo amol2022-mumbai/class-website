@@ -1,14 +1,28 @@
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
+
+// Uses node:sqlite (DatabaseSync) - built into Node.js 22.13+, zero native
+// dependencies, so no compilation is required on standard hosting (Hostinger etc).
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = require('node:sqlite'));
+} catch (e) {
+  console.error(
+    '\n[node:sqlite] The built-in SQLite module was not found.\n' +
+    '  This app requires Node.js 22.13 or newer (Node 22.13+, 23.4+, 24+).\n' +
+    '  Pick a Node.js LTS version >= 22.13 in your hosting control panel.\n' +
+    '  No extra packages are needed - SQLite ships inside Node.js.\n'
+  );
+  process.exit(1);
+}
 
 const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new Database(path.join(dataDir, 'lms.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = new DatabaseSync(path.join(dataDir, 'lms.db'));
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
