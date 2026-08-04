@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Portal // VUMCA LMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <div class="dash">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <div class="brand">
+          <span class="logo-icon">◈</span>
+          <div>VUMCA <span class="accent">hITECH</span> LMS</div>
+        </div>
+        <span class="role-tag">STUDENT PORTAL</span>
+      </div>
+      <nav class="side-nav" id="sideNav">
+        <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
+        <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> My Courses</button>
+        <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Assignments</button>
+        <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
+        <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
+        <button class="nav-item" data-tab="grades"><span class="nav-icon">▤</span> Grades</button>
+      </nav>
+      <div class="side-footer">
+        <div class="side-user">
+          <div class="su-name" id="userName">—</div>
+          <div class="su-id" id="userId">@student</div>
+        </div>
+        <button class="btn btn-ghost btn-full" style="width:100%" onclick="logout()">LOG OUT</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1>
+          <span class="tag" id="pageTag">// STUDENT / OVERVIEW</span>
+          <span id="pageTitle">My Dashboard</span>
+        </h1>
+      </div>
+
+      <!-- Dashboard -->
+      <section id="tab-dashboard" class="tab-panel">
+        <div class="stat-grid" id="statGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>My Courses</h2></div>
+          <div class="course-grid" id="dashCourses"></div>
+        </div>
+      </section>
+
+      <!-- Courses -->
+      <section id="tab-courses" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Enrolled Courses</h2></div>
+          <div class="course-grid" id="courseGrid"></div>
+        </div>
+      </section>
+
+      <!-- Assignments -->
+      <section id="tab-assignments" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Assignments</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Title</th><th>Course</th><th>Due</th><th>Max Score</th><th>Status</th><th>Action</th></tr>
+              </thead>
+              <tbody id="assignmentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quizzes -->
+      <section id="tab-quizzes" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Available Quizzes</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Title</th><th>Course</th><th>Questions</th><th>Time</th><th>Last Score</th><th>Action</th></tr>
+              </thead>
+              <tbody id="quizRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Attendance -->
+      <section id="tab-attendance" class="tab-panel hidden">
+        <div class="stat-grid" id="attStatGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>Attendance Log</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Course</th><th>Status</th></tr></thead>
+              <tbody id="attendanceRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Grades -->
+      <section id="tab-grades" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Assignment Grades</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Assignment</th><th>Course</th><th>Score</th><th>Max</th></tr></thead>
+              <tbody id="gradeRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Quiz Results</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Quiz</th><th>Course</th><th>Score</th></tr></thead>
+              <tbody id="quizGradeRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Quiz taking modal -->
+  <div class="modal-overlay hidden" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Title</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script src="js/student.js"></script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login // VUMCA LMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page">
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="brand">
+        <span class="logo-icon">◈</span>
+        <div>
+          VUMCA <span class="accent">hITECH</span> LMS
+          <small>// SYSTEM ACCESS PORTAL</small>
+        </div>
+      </div>
+
+      <div id="alert" class="alert hidden"></div>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="username">Username / Student ID</label>
+          <input type="text" id="username" name="username" autocomplete="username"
+                 placeholder="admin or STU001" required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password"
+                 placeholder="Enter your password" required>
+        </div>
+        <button type="submit" class="btn btn-full" id="submitBtn" style="width:100%">
+          AUTHENTICATE
+        </button>
+      </form>
+
+      <div class="auth-info">
+        <p><strong>ADMIN ACCESS</strong></p>
+        <p>Username: <code>admin</code> &nbsp; Password: <code>admin123</code></p>
+        <p style="margin-top:8px"><strong>STUDENT ACCESS</strong></p>
+        <p>Username: <code>STU001</code> &nbsp; Password: <code>student123</code></p>
+      </div>
+
+      <a href="/" class="back-link">← Back to VUMCA hITECH site</a>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertEl = document.getElementById('alert');
+      const btn = document.getElementById('submitBtn');
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      alertEl.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'VERIFYING...';
+
+      try {
+        const { user } = await api('/api/auth/login', {
+          method: 'POST',
+          body: { username, password },
+        });
+        window.location.href = user.role === 'admin' ? '/admin.html' : '/student.html';
+      } catch (err) {
+        alertEl.textContent = 'ACCESS DENIED — ' + err.message;
+        alertEl.classList.remove('hidden');
+        alertEl.classList.add('alert-error');
+        btn.disabled = false;
+        btn.textContent = 'AUTHENTICATE';
+      }
+    });
+  </script>
+</body>
+</html>

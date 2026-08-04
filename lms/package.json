@@ -1,0 +1,16 @@
+{
+  "name": "vumca-lms",
+  "version": "1.0.0",
+  "description": "VUMCA hITECH Computing - Learning Management System",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0"
+  }
+}

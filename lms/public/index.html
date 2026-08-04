@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VUMCA hITECH Computing LMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .landing {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+    .landing-tag { font-family: var(--font-display); font-size: 12px; letter-spacing: 4px; color: var(--cyan); margin-bottom: 16px; }
+    .landing h1 { font-family: var(--font-display); font-size: clamp(28px, 5vw, 48px); font-weight: 900; letter-spacing: 1px; line-height: 1.2; margin-bottom: 18px; }
+    .landing h1 .accent { color: var(--cyan); text-shadow: var(--glow-cyan); }
+    .landing p.sub { color: var(--text-muted); font-size: 18px; max-width: 560px; margin-bottom: 32px; }
+    .landing-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 44px; }
+    .feature-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 40px; }
+    .feature { border: 1px solid var(--border); border-radius: 10px; padding: 18px; background: var(--bg-card); }
+    .feature .f-icon { font-size: 22px; color: var(--purple); margin-bottom: 8px; }
+    .feature h3 { font-size: 16px; margin-bottom: 6px; }
+    .feature p { font-size: 13px; color: var(--text-muted); }
+    .login-hint { border: 1px dashed var(--border); border-radius: 10px; padding: 20px 24px; background: var(--bg-elevated); }
+    .login-hint h3 { font-family: var(--font-display); font-size: 13px; letter-spacing: 1px; margin-bottom: 10px; color: var(--cyan); }
+    .login-hint code { color: var(--purple); background: var(--bg-dark); padding: 2px 8px; border-radius: 4px; font-size: 13px; }
+    .login-hint p { font-size: 14px; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <div class="landing">
+    <p class="landing-tag">// VUMCA hITECH COMPUTING · LMS v1.0</p>
+    <h1>Digital Classroom <span class="accent">Command System</span></h1>
+    <p class="sub">
+      The Learning Management System for the Computer Science program.
+      Manage courses, assignments, quizzes, and attendance — all in one cyber cockpit.
+    </p>
+
+    <div class="landing-actions">
+      <a href="login.html" class="btn">LOGIN / ACCESS PORTAL</a>
+      <a href="login.html" class="btn btn-ghost">STUDENT LOGIN</a>
+    </div>
+
+    <div class="feature-row">
+      <div class="feature">
+        <div class="f-icon">⬡</div>
+        <h3>Courses</h3>
+        <p>Structured learning modules from beginner programming to advanced AI.</p>
+      </div>
+      <div class="feature">
+        <div class="f-icon">✎</div>
+        <h3>Assignments</h3>
+        <p>Submit your work online and receive grades directly in the portal.</p>
+      </div>
+      <div class="feature">
+        <div class="f-icon">◎</div>
+        <h3>Quizzes</h3>
+        <p>Instant-graded quizzes with auto-scoring and immediate feedback.</p>
+      </div>
+      <div class="feature">
+        <div class="f-icon">✓</div>
+        <h3>Attendance</h3>
+        <p>Daily attendance tracking with present, late, and absent markers.</p>
+      </div>
+    </div>
+
+    <div class="login-hint">
+      <h3>SYSTEM CREDENTIALS FOR DEMO</h3>
+      <p>Admin — username: <code>admin</code> &nbsp; password: <code>admin123</code></p>
+      <p>Student — username: <code>STU001</code> &nbsp; password: <code>student123</code></p>
+    </div>
+  </div>
+</body>
+</html>
