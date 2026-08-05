@@ -162,7 +162,11 @@ a { color: var(--cyan); text-decoration: none; }
   flex-direction: column;
   gap: 6px;
   position: sticky; top: 0; height: 100vh;
+  overflow-y: auto;
 }
+.sidebar .side-brand { flex-shrink: 0; }
+.sidebar .side-footer { flex-shrink: 0; }
+.side-nav { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
 .sidebar .brand { margin-bottom: 22px; font-size: 14px; }
 .side-brand { margin-bottom: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .side-brand .role-tag {
