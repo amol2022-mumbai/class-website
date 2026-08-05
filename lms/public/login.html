@@ -46,6 +46,10 @@
         <p>Username: <code>admin</code> &nbsp; Password: <code>admin123</code></p>
         <p style="margin-top:8px"><strong>STUDENT ACCESS</strong></p>
         <p>Username: <code>STU001</code> &nbsp; Password: <code>student123</code></p>
+        <p style="margin-top:8px"><strong>FACULTY ACCESS</strong></p>
+        <p>Username: <code>FAC001</code> &nbsp; Password: <code>faculty123</code></p>
+        <p style="margin-top:8px"><strong>PARENT ACCESS</strong></p>
+        <p>Username: <code>PAR001</code> &nbsp; Password: <code>parent123</code></p>
       </div>
 
       <a href="/" class="back-link">← Back to VUMCA hITECH site</a>
@@ -70,7 +74,7 @@
           method: 'POST',
           body: { username, password },
         });
-        window.location.href = user.role === 'admin' ? '/admin.html' : '/student.html';
+        window.location.href = roleHome(user.role);
       } catch (err) {
         alertEl.textContent = 'ACCESS DENIED — ' + err.message;
         alertEl.classList.remove('hidden');

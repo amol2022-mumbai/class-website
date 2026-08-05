@@ -37,6 +37,18 @@ function requireStudent(req, res, next) {
   next();
 }
 
+function requireFaculty(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.session.user.role !== 'faculty') return res.status(403).json({ error: 'Faculty access required' });
+  next();
+}
+
+function requireParent(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.session.user.role !== 'parent') return res.status(403).json({ error: 'Parent access required' });
+  next();
+}
+
 const publicUser = (row) => row && ({ id: row.id, role: row.role, username: row.username, name: row.name, email: row.email });
 
 // ---------- Auth ----------
@@ -80,7 +92,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 // ---------- Admin: students ----------
 app.get('/api/admin/students', requireAdmin, (req, res) => {
   const students = db.prepare(`
-    SELECT u.id, u.username, u.name, u.email, u.mobile,
+    SELECT u.id, u.username, u.name, u.email, u.mobile, u.fee_amount, u.fee_paid,
            (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) AS course_count,
            (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days
     FROM users u WHERE u.role = 'student' ORDER BY u.name
@@ -89,29 +101,37 @@ app.get('/api/admin/students', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/students', requireAdmin, (req, res) => {
-  const { username, password, name, email, mobile } = req.body || {};
+  const { username, password, name, email, mobile, fee_amount, fee_paid } = req.body || {};
   if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
     return res.status(409).json({ error: 'Username already exists' });
   }
   const hash = bcrypt.hashSync(password, 10);
   const result = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email, mobile) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run('student', username, hash, name, email || null, mobile || null);
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run('student', username, hash, name, email || null, mobile || null,
+        fee_amount != null ? Number(fee_amount) : 0,
+        fee_paid ? 1 : 0);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
-  const { name, email, mobile, password } = req.body || {};
+  const { name, email, mobile, fee_amount, fee_paid, password } = req.body || {};
   const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
+  const fields = {
+    name: name ?? student.name,
+    email: email ?? student.email,
+    mobile: mobile ?? student.mobile,
+    fee_amount: fee_amount != null ? Number(fee_amount) : student.fee_amount,
+    fee_paid: fee_paid != null ? (fee_paid ? 1 : 0) : student.fee_paid,
+  };
   if (password) {
-    const hash = bcrypt.hashSync(password, 10);
-    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, password_hash = ? WHERE id = ?')
-      .run(name || student.name, email ?? student.email, mobile ?? student.mobile, hash, student.id);
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ?, password_hash = ? WHERE id = ?')
+      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, bcrypt.hashSync(password, 10), student.id);
   } else {
-    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?')
-      .run(name || student.name, email ?? student.email, mobile ?? student.mobile, student.id);
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ? WHERE id = ?')
+      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, student.id);
   }
   res.json({ ok: true });
 });
@@ -319,6 +339,16 @@ app.post('/api/admin/quizzes/generate', requireAdmin, async (req, res) => {
   }
 });
 
+// ---------- Admin: reports ----------
+const { builders } = require('./reports');
+const notify = require('./notify');
+
+app.get('/api/admin/reports/:type', requireAdmin, (req, res) => {
+  const builder = builders[req.params.type];
+  if (!builder) return res.status(404).json({ error: 'Unknown report type' });
+  res.json(builder());
+});
+
 // ---------- Admin: attendance ----------
 app.get('/api/admin/attendance', requireAdmin, (req, res) => {
   const dates = db.prepare('SELECT DISTINCT date FROM attendance ORDER BY date DESC').all().map(r => r.date);
@@ -459,6 +489,622 @@ app.get('/api/student/grades', requireStudent, (req, res) => {
   `).all(req.session.user.id);
 
   res.json({ assignmentGrades, quizGrades, attendanceSummary });
+});
+
+// =====================================================================
+// ======================== ADMIN: EXTENDED MODULES =====================
+// =====================================================================
+
+// ---------- Admin: faculty ----------
+app.get('/api/admin/faculty', requireAdmin, (req, res) => {
+  const faculty = db.prepare(`
+    SELECT u.id, u.username, u.name, u.email, u.mobile,
+      (SELECT COUNT(*) FROM faculty_courses fc WHERE fc.faculty_id = u.id) AS course_count
+    FROM users u WHERE u.role = 'faculty' ORDER BY u.name
+  `).all();
+  const courses = db.prepare(`
+    SELECT fc.faculty_id, c.id AS course_id, c.code, c.title
+    FROM faculty_courses fc JOIN courses c ON c.id = fc.course_id ORDER BY c.code
+  `).all();
+  const byFaculty = {};
+  for (const c of courses) {
+    if (!byFaculty[c.faculty_id]) byFaculty[c.faculty_id] = [];
+    byFaculty[c.faculty_id].push({ id: c.course_id, code: c.code, title: c.title });
+  }
+  res.json(faculty.map(f => ({ ...f, courses: byFaculty[f.id] || [] })));
+});
+
+app.post('/api/admin/faculty', requireAdmin, (req, res) => {
+  const { username, password, name, email, mobile, course_ids } = req.body || {};
+  if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
+  if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
+    return res.status(409).json({ error: 'Username already exists' });
+  }
+  const result = db.prepare(
+    'INSERT INTO users (role, username, password_hash, name, email, mobile) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('faculty', username, bcrypt.hashSync(password, 10), name, email || null, mobile || null);
+  const stmt = db.prepare('INSERT INTO faculty_courses (faculty_id, course_id) VALUES (?, ?)');
+  for (const cid of course_ids || []) {
+    try { stmt.run(result.lastInsertRowid, cid); } catch (_) {}
+  }
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/faculty/:id', requireAdmin, (req, res) => {
+  const faculty = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'faculty'").get(req.params.id);
+  if (!faculty) return res.status(404).json({ error: 'Faculty not found' });
+  const { name, email, mobile, password, course_ids } = req.body || {};
+  if (password) {
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, password_hash = ? WHERE id = ?')
+      .run(name || faculty.name, email ?? faculty.email, mobile ?? faculty.mobile, bcrypt.hashSync(password, 10), faculty.id);
+  } else {
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?')
+      .run(name || faculty.name, email ?? faculty.email, mobile ?? faculty.mobile, faculty.id);
+  }
+  if (Array.isArray(course_ids)) {
+    db.prepare('DELETE FROM faculty_courses WHERE faculty_id = ?').run(faculty.id);
+    const stmt = db.prepare('INSERT INTO faculty_courses (faculty_id, course_id) VALUES (?, ?)');
+    for (const cid of course_ids) {
+      try { stmt.run(faculty.id, cid); } catch (_) {}
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/faculty/:id', requireAdmin, (req, res) => {
+  const result = db.prepare("DELETE FROM users WHERE id = ? AND role = 'faculty'").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Faculty not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Admin: parents ----------
+app.get('/api/admin/parents', requireAdmin, (req, res) => {
+  const parents = db.prepare(`
+    SELECT u.id, u.username, u.name, u.email, u.mobile,
+      (SELECT COUNT(*) FROM parent_students ps WHERE ps.parent_id = u.id) AS child_count
+    FROM users u WHERE u.role = 'parent' ORDER BY u.name
+  `).all();
+  const links = db.prepare(`
+    SELECT ps.parent_id, s.id AS student_id, s.username, s.name AS student_name
+    FROM parent_students ps JOIN users s ON s.id = ps.student_id ORDER BY s.name
+  `).all();
+  const byParent = {};
+  for (const l of links) {
+    if (!byParent[l.parent_id]) byParent[l.parent_id] = [];
+    byParent[l.parent_id].push({ id: l.student_id, username: l.username, name: l.student_name });
+  }
+  res.json(parents.map(p => ({ ...p, children: byParent[p.id] || [] })));
+});
+
+app.post('/api/admin/parents', requireAdmin, (req, res) => {
+  const { username, password, name, email, mobile, student_ids } = req.body || {};
+  if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
+  if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
+    return res.status(409).json({ error: 'Username already exists' });
+  }
+  const result = db.prepare(
+    'INSERT INTO users (role, username, password_hash, name, email, mobile) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('parent', username, bcrypt.hashSync(password, 10), name, email || null, mobile || null);
+  const stmt = db.prepare('INSERT INTO parent_students (parent_id, student_id) VALUES (?, ?)');
+  for (const sid of student_ids || []) {
+    try { stmt.run(result.lastInsertRowid, sid); } catch (_) {}
+  }
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/parents/:id', requireAdmin, (req, res) => {
+  const parent = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'parent'").get(req.params.id);
+  if (!parent) return res.status(404).json({ error: 'Parent not found' });
+  const { name, email, mobile, password, student_ids } = req.body || {};
+  if (password) {
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, password_hash = ? WHERE id = ?')
+      .run(name || parent.name, email ?? parent.email, mobile ?? parent.mobile, bcrypt.hashSync(password, 10), parent.id);
+  } else {
+    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?')
+      .run(name || parent.name, email ?? parent.email, mobile ?? parent.mobile, parent.id);
+  }
+  if (Array.isArray(student_ids)) {
+    db.prepare('DELETE FROM parent_students WHERE parent_id = ?').run(parent.id);
+    const stmt = db.prepare('INSERT INTO parent_students (parent_id, student_id) VALUES (?, ?)');
+    for (const sid of student_ids) {
+      try { stmt.run(parent.id, sid); } catch (_) {}
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/parents/:id', requireAdmin, (req, res) => {
+  const result = db.prepare("DELETE FROM users WHERE id = ? AND role = 'parent'").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Parent not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Admin: batches ----------
+app.get('/api/admin/batches', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT b.*, c.code AS course_code, c.title AS course_title,
+      (SELECT COUNT(*) FROM enrollments e WHERE e.batch_id = b.id) AS student_count,
+      (SELECT COUNT(*) FROM timetable t WHERE t.batch_id = b.id) AS slot_count
+    FROM batches b JOIN courses c ON c.id = b.course_id ORDER BY b.name
+  `).all());
+});
+
+app.post('/api/admin/batches', requireAdmin, (req, res) => {
+  const { course_id, name, start_date, end_date, capacity } = req.body || {};
+  if (!course_id || !name) return res.status(400).json({ error: 'Course and batch name are required' });
+  const result = db.prepare(
+    'INSERT INTO batches (course_id, name, start_date, end_date, capacity) VALUES (?, ?, ?, ?, ?)'
+  ).run(course_id, name, start_date || null, end_date || null, capacity || 0);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/batches/:id', requireAdmin, (req, res) => {
+  const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(req.params.id);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  const { name, start_date, end_date, capacity } = req.body || {};
+  db.prepare('UPDATE batches SET name = ?, start_date = ?, end_date = ?, capacity = ? WHERE id = ?')
+    .run(name || batch.name, start_date ?? batch.start_date, end_date ?? batch.end_date,
+         capacity != null ? Number(capacity) : batch.capacity, batch.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/batches/:id', requireAdmin, (req, res) => {
+  const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(req.params.id);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  db.prepare('UPDATE enrollments SET batch_id = NULL WHERE batch_id = ?').run(batch.id);
+  db.prepare('DELETE FROM batches WHERE id = ?').run(batch.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/batches/:id', requireAdmin, (req, res) => {
+  const batch = db.prepare(`
+    SELECT b.*, c.code AS course_code, c.title AS course_title
+    FROM batches b JOIN courses c ON c.id = b.course_id WHERE b.id = ?
+  `).get(req.params.id);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  const students = db.prepare(`
+    SELECT u.id, u.username, u.name, u.mobile
+    FROM enrollments e JOIN users u ON u.id = e.student_id
+    WHERE e.batch_id = ? ORDER BY u.name
+  `).all(batch.id);
+  const timetable = db.prepare(
+    'SELECT * FROM timetable WHERE batch_id = ? ORDER BY CASE day WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 ELSE 6 END, start_time'
+  ).all(batch.id);
+  const availableStudents = db.prepare(`
+    SELECT u.id, u.username, u.name FROM users u
+    WHERE u.role = 'student'
+      AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = u.id AND e.course_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM enrollments e2 WHERE e2.student_id = u.id AND e2.batch_id = ?)
+    ORDER BY u.name
+  `).all(batch.course_id, batch.id);
+  res.json({ batch, students, timetable, availableStudents });
+});
+
+app.post('/api/admin/batches/:id/students', requireAdmin, (req, res) => {
+  const { student_id } = req.body || {};
+  const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(req.params.id);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  const result = db.prepare(
+    'UPDATE enrollments SET batch_id = ? WHERE student_id = ? AND course_id = ?'
+  ).run(batch.id, student_id, batch.course_id);
+  if (result.changes === 0) return res.status(400).json({ error: 'Student is not enrolled in this course or already in a batch' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/batches/:id/students/:sid', requireAdmin, (req, res) => {
+  db.prepare('UPDATE enrollments SET batch_id = NULL WHERE student_id = ? AND batch_id = ?')
+    .run(req.params.sid, req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: timetable ----------
+app.post('/api/admin/timetable', requireAdmin, (req, res) => {
+  const { batch_id, day, start_time, end_time, subject, instructor } = req.body || {};
+  if (!batch_id || !day || !start_time || !end_time || !subject) {
+    return res.status(400).json({ error: 'Batch, day, times and subject are required' });
+  }
+  const result = db.prepare(
+    'INSERT INTO timetable (batch_id, day, start_time, end_time, subject, instructor) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(batch_id, day, start_time, end_time, subject, instructor || '');
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/timetable/:id', requireAdmin, (req, res) => {
+  const slot = db.prepare('SELECT * FROM timetable WHERE id = ?').get(req.params.id);
+  if (!slot) return res.status(404).json({ error: 'Timetable slot not found' });
+  const { day, start_time, end_time, subject, instructor } = req.body || {};
+  db.prepare('UPDATE timetable SET day = ?, start_time = ?, end_time = ?, subject = ?, instructor = ? WHERE id = ?')
+    .run(day || slot.day, start_time || slot.start_time, end_time || slot.end_time,
+         subject || slot.subject, instructor ?? slot.instructor, slot.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/timetable/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM timetable WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: payments & receipts ----------
+app.get('/api/admin/payments', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT p.*, u.username, u.name AS student_name
+    FROM payments p JOIN users u ON u.id = p.student_id
+    ORDER BY p.paid_at DESC, p.id DESC
+  `).all());
+});
+
+app.post('/api/admin/payments', requireAdmin, (req, res) => {
+  const { student_id, amount, method, note } = req.body || {};
+  if (!student_id || amount == null) return res.status(400).json({ error: 'Student and amount are required' });
+  const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(student_id);
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  const receiptNo = 'RCP-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-6);
+  const result = db.prepare(
+    'INSERT INTO payments (student_id, amount, method, receipt_no, note, paid_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))'
+  ).run(student_id, Number(amount), method || 'cash', receiptNo, note || null);
+  // Auto-mark fee paid when this payment clears the fee amount.
+  const totalPaid = db.prepare('SELECT COALESCE(SUM(amount),0) AS t FROM payments WHERE student_id = ?').get(student_id).t;
+  if (totalPaid >= (student.fee_amount || 0)) {
+    db.prepare('UPDATE users SET fee_paid = 1 WHERE id = ?').run(student_id);
+  }
+  res.status(201).json({ id: result.lastInsertRowid, receipt_no: receiptNo });
+});
+
+app.get('/api/admin/payments/:id/receipt', requireAdmin, (req, res) => {
+  const payment = db.prepare(`
+    SELECT p.*, u.username, u.name AS student_name, u.email, u.mobile, u.fee_amount
+    FROM payments p JOIN users u ON u.id = p.student_id WHERE p.id = ?
+  `).get(req.params.id);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  res.json(payment);
+});
+
+app.delete('/api/admin/payments/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM payments WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: exams & results ----------
+app.get('/api/admin/exams', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT x.*, c.code AS course_code, c.title AS course_title,
+      (SELECT COUNT(*) FROM exam_results r WHERE r.exam_id = x.id) AS result_count
+    FROM exams x JOIN courses c ON c.id = x.course_id ORDER BY x.exam_date
+  `).all());
+});
+
+app.post('/api/admin/exams', requireAdmin, (req, res) => {
+  const { course_id, title, exam_date, max_marks } = req.body || {};
+  if (!course_id || !title) return res.status(400).json({ error: 'Course and exam title are required' });
+  const result = db.prepare(
+    'INSERT INTO exams (course_id, title, exam_date, max_marks) VALUES (?, ?, ?, ?)'
+  ).run(course_id, title, exam_date || null, max_marks || 100);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/exams/:id', requireAdmin, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const { title, exam_date, max_marks } = req.body || {};
+  db.prepare('UPDATE exams SET title = ?, exam_date = ?, max_marks = ? WHERE id = ?')
+    .run(title || exam.title, exam_date ?? exam.exam_date, max_marks || exam.max_marks, exam.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/exams/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM exams WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/exams/:id/results', requireAdmin, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const enrolled = db.prepare(`
+    SELECT u.id, u.username, u.name, r.marks
+    FROM enrollments e
+    JOIN users u ON u.id = e.student_id
+    LEFT JOIN exam_results r ON r.exam_id = ? AND r.student_id = u.id
+    WHERE e.course_id = ? ORDER BY u.name
+  `).all(exam.id, exam.course_id);
+  res.json({ exam, rows: enrolled });
+});
+
+app.post('/api/admin/exams/:id/results', requireAdmin, (req, res) => {
+  const { marks } = req.body || {};
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const stmt = db.prepare(`
+    INSERT INTO exam_results (exam_id, student_id, marks) VALUES (?, ?, ?)
+    ON CONFLICT(exam_id, student_id) DO UPDATE SET marks = excluded.marks
+  `);
+  db.exec('BEGIN');
+  try {
+    for (const [sid, m] of Object.entries(marks || {})) {
+      stmt.run(exam.id, Number(sid), Number(m));
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  res.json({ ok: true });
+});
+
+// ---------- Admin: certificates ----------
+app.get('/api/admin/certificates', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT cert.*, u.username, u.name AS student_name, c.code AS course_code, c.title AS course_title
+    FROM certificates cert
+    JOIN users u ON u.id = cert.student_id
+    JOIN courses c ON c.id = cert.course_id
+    ORDER BY cert.id DESC
+  `).all());
+});
+
+app.post('/api/admin/certificates', requireAdmin, (req, res) => {
+  const { student_id, course_id, type } = req.body || {};
+  if (!student_id || !course_id) return res.status(400).json({ error: 'Student and course are required' });
+  const certNo = 'CERT-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-6);
+  const result = db.prepare(
+    'INSERT INTO certificates (student_id, course_id, cert_no, type, issued_date) VALUES (?, ?, ?, ?, date(\'now\'))'
+  ).run(student_id, course_id, certNo, type || 'completion');
+  res.status(201).json({ id: result.lastInsertRowid, cert_no: certNo });
+});
+
+app.delete('/api/admin/certificates/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM certificates WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: notifications / reminders ----------
+app.get('/api/admin/notifications', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT n.*, u.username, u.name AS student_name, u.mobile
+    FROM notifications n JOIN users u ON u.id = n.student_id
+    ORDER BY n.id DESC LIMIT 200
+  `).all());
+});
+
+app.get('/api/admin/notifications/status', requireAdmin, (req, res) => {
+  res.json({ configured: notify.isConfigured() });
+});
+
+app.post('/api/admin/notifications/send', requireAdmin, async (req, res) => {
+  const { channel, purpose, student_id, message } = req.body || {};
+  if (!student_id || !channel || !purpose) {
+    return res.status(400).json({ error: 'Student, channel and purpose are required' });
+  }
+  const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(student_id);
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  if (!student.mobile) return res.status(400).json({ error: 'Student has no mobile number' });
+  const msg = message || defaultReminder(student, purpose);
+  const result = await notify.sendReminder({ to: student.mobile, channel, message: msg });
+  db.prepare(
+    'INSERT INTO notifications (student_id, channel, purpose, message, status, sent_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))'
+  ).run(student_id, channel, purpose, msg, result.status);
+  res.status(201).json({ ok: true, status: result.status, simulated: !!result.simulated });
+});
+
+app.post('/api/admin/notifications/send-all', requireAdmin, async (req, res) => {
+  const { channel, purpose, student_ids } = req.body || {};
+  if (!Array.isArray(student_ids) || student_ids.length === 0) {
+    return res.status(400).json({ error: 'Select at least one student' });
+  }
+  const students = db.prepare('SELECT * FROM users WHERE id IN (' + student_ids.map(() => '?').join(',') + ')').all(...student_ids);
+  const insert = db.prepare(
+    'INSERT INTO notifications (student_id, channel, purpose, message, status, sent_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))'
+  );
+  let sent = 0;
+  for (const s of students) {
+    if (!s.mobile) continue;
+    const msg = defaultReminder(s, purpose);
+    const result = await notify.sendReminder({ to: s.mobile, channel: channel || 'sms', message: msg });
+    insert.run(s.id, channel || 'sms', purpose, msg, result.status);
+    if (result.status === 'sent') sent += 1;
+  }
+  res.json({ ok: true, sent });
+});
+
+function defaultReminder(student, purpose) {
+  const name = student.name.split(' ')[0];
+  if (purpose === 'fee') {
+    const status = student.fee_paid ? 'your fee has been cleared' : `your fee of $${student.fee_amount || 0} is still pending`;
+    return `Hi ${name}, ${status}. Please contact the office. - VUMCA hITECH Computing`;
+  }
+  if (purpose === 'class') {
+    return `Hi ${name}, reminder: your computer class is scheduled for tomorrow. Be on time! - VUMCA hITECH Computing`;
+  }
+  return `Hi ${name}, this is a reminder from VUMCA hITECH Computing.`;
+}
+
+// =====================================================================
+// ======================== STUDENT: EXTENDED MODULES ===================
+// =====================================================================
+
+app.get('/api/student/timetable', requireStudent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT t.*, b.name AS batch_name, c.code AS course_code
+    FROM timetable t
+    JOIN batches b ON b.id = t.batch_id
+    JOIN enrollments e ON e.batch_id = b.id
+    JOIN courses c ON c.id = b.course_id
+    WHERE e.student_id = ?
+    ORDER BY CASE t.day WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, t.start_time
+  `).all(req.session.user.id));
+});
+
+app.get('/api/student/exams', requireStudent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT x.*, c.code AS course_code, c.title AS course_title, r.marks
+    FROM enrollments e
+    JOIN exams x ON x.course_id = e.course_id
+    JOIN courses c ON c.id = x.course_id
+    LEFT JOIN exam_results r ON r.exam_id = x.id AND r.student_id = e.student_id
+    WHERE e.student_id = ? ORDER BY x.exam_date
+  `).all(req.session.user.id));
+});
+
+app.get('/api/student/fees', requireStudent, (req, res) => {
+  const student = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.user.id);
+  const payments = db.prepare(`
+    SELECT p.* FROM payments p WHERE p.student_id = ? ORDER BY p.paid_at DESC
+  `).all(req.session.user.id);
+  const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  res.json({
+    fee_amount: student.fee_amount || 0,
+    fee_paid: student.fee_paid,
+    total_paid: totalPaid,
+    pending: Math.max(0, (student.fee_amount || 0) - totalPaid),
+    payments,
+  });
+});
+
+app.get('/api/student/certificates', requireStudent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT cert.*, c.code AS course_code, c.title AS course_title
+    FROM certificates cert JOIN courses c ON c.id = cert.course_id
+    WHERE cert.student_id = ? ORDER BY cert.id DESC
+  `).all(req.session.user.id));
+});
+
+// =====================================================================
+// ======================== FACULTY PORTAL ==============================
+// =====================================================================
+
+app.get('/api/faculty/courses', requireFaculty, (req, res) => {
+  res.json(db.prepare(`
+    SELECT c.*, b.id AS batch_id, b.name AS batch_name,
+      (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS student_count
+    FROM faculty_courses fc
+    JOIN courses c ON c.id = fc.course_id
+    LEFT JOIN batches b ON b.course_id = c.id
+    WHERE fc.faculty_id = ? ORDER BY c.code
+  `).all(req.session.user.id));
+});
+
+app.get('/api/faculty/timetable', requireFaculty, (req, res) => {
+  res.json(db.prepare(`
+    SELECT t.*, b.name AS batch_name, c.code AS course_code
+    FROM timetable t
+    JOIN batches b ON b.id = t.batch_id
+    JOIN courses c ON c.id = b.course_id
+    JOIN faculty_courses fc ON fc.course_id = c.id
+    WHERE fc.faculty_id = ?
+    ORDER BY CASE t.day WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, t.start_time
+  `).all(req.session.user.id));
+});
+
+app.get('/api/faculty/courses/:id/students', requireFaculty, (req, res) => {
+  const owned = db.prepare(
+    'SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?'
+  ).get(req.session.user.id, req.params.id);
+  if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
+  res.json(db.prepare(`
+    SELECT u.id, u.username, u.name, u.mobile,
+      (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.course_id = ?) AS attendance_count
+    FROM enrollments e JOIN users u ON u.id = e.student_id
+    WHERE e.course_id = ? ORDER BY u.name
+  `).all(req.params.id, req.params.id));
+});
+
+app.post('/api/faculty/attendance', requireFaculty, (req, res) => {
+  const { student_id, course_id, date, status } = req.body || {};
+  const owned = db.prepare(
+    'SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?'
+  ).get(req.session.user.id, course_id);
+  if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
+  db.prepare(`
+    INSERT INTO attendance (student_id, course_id, date, status) VALUES (?, ?, ?, ?)
+    ON CONFLICT(student_id, course_id, date) DO UPDATE SET status = excluded.status
+  `).run(student_id, course_id, date, status);
+  res.json({ ok: true });
+});
+
+app.get('/api/faculty/courses/:id/assignments', requireFaculty, (req, res) => {
+  const owned = db.prepare(
+    'SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?'
+  ).get(req.session.user.id, req.params.id);
+  if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
+  res.json(db.prepare('SELECT * FROM assignments WHERE course_id = ? ORDER BY due_date').all(req.params.id));
+});
+
+app.get('/api/faculty/assignments/:id/submissions', requireFaculty, (req, res) => {
+  const assignment = db.prepare(`
+    SELECT a.*, fc.id AS owned FROM assignments a
+    JOIN faculty_courses fc ON fc.course_id = a.course_id
+    WHERE a.id = ? AND fc.faculty_id = ?
+  `).get(req.params.id, req.session.user.id);
+  if (!assignment) return res.status(403).json({ error: 'Not assigned to this course' });
+  res.json(db.prepare(`
+    SELECT s.*, u.username, u.name AS student_name
+    FROM submissions s JOIN users u ON u.id = s.student_id
+    WHERE s.assignment_id = ? ORDER BY s.submitted_at DESC
+  `).all(req.params.id));
+});
+
+app.post('/api/faculty/assignments/:id/submissions/:sid/grade', requireFaculty, (req, res) => {
+  const { score } = req.body || {};
+  const assignment = db.prepare(`
+    SELECT a.id FROM assignments a
+    JOIN faculty_courses fc ON fc.course_id = a.course_id
+    WHERE a.id = ? AND fc.faculty_id = ?
+  `).get(req.params.id, req.session.user.id);
+  if (!assignment) return res.status(403).json({ error: 'Not assigned to this course' });
+  db.prepare('UPDATE submissions SET score = ? WHERE id = ?').run(Number(score), req.params.sid);
+  res.json({ ok: true });
+});
+
+// =====================================================================
+// ======================== PARENT PORTAL ===============================
+// =====================================================================
+
+app.get('/api/parent/children', requireParent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT s.id, s.username, s.name, s.mobile
+    FROM parent_students ps JOIN users s ON s.id = ps.student_id
+    WHERE ps.parent_id = ? ORDER BY s.name
+  `).all(req.session.user.id));
+});
+
+app.get('/api/parent/children/:id/dashboard', requireParent, (req, res) => {
+  const childId = Number(req.params.id);
+  const linked = db.prepare(
+    'SELECT id FROM parent_students WHERE parent_id = ? AND student_id = ?'
+  ).get(req.session.user.id, childId);
+  if (!linked) return res.status(403).json({ error: 'Not linked to this student' });
+
+  const student = db.prepare('SELECT * FROM users WHERE id = ?').get(childId);
+  const courses = db.prepare(`
+    SELECT c.code, c.title, c.instructor FROM enrollments e
+    JOIN courses c ON c.id = e.course_id WHERE e.student_id = ?
+  `).all(childId);
+  const attendance = db.prepare(`
+    SELECT a.date, a.status, c.code AS course_code FROM attendance a
+    JOIN courses c ON c.id = a.course_id WHERE a.student_id = ? ORDER BY a.date DESC
+  `).all(childId);
+  const payments = db.prepare('SELECT * FROM payments WHERE student_id = ? ORDER BY paid_at DESC').all(childId);
+  const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const examResults = db.prepare(`
+    SELECT x.title, x.max_marks, r.marks, c.code AS course_code
+    FROM exam_results r
+    JOIN exams x ON x.id = r.exam_id
+    JOIN courses c ON c.id = x.course_id
+    WHERE r.student_id = ?
+  `).all(childId);
+
+  const present = attendance.filter(a => a.status === 'present').length;
+  const late = attendance.filter(a => a.status === 'late').length;
+  const totalDays = attendance.length;
+
+  res.json({
+    student: { name: student.name, username: student.username, mobile: student.mobile },
+    courses,
+    attendance,
+    attendanceSummary: { present, late, absent: totalDays - present - late, total: totalDays },
+    fee: { fee_amount: student.fee_amount, fee_paid: student.fee_paid, total_paid: totalPaid, pending: Math.max(0, (student.fee_amount || 0) - totalPaid) },
+    payments,
+    examResults,
+  });
 });
 
 app.listen(PORT, () => {

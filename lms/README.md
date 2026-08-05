@@ -33,17 +33,29 @@ The SQLite file is created automatically at `data/lms.db` and seeded on first ru
 |---------|----------|-------------|
 | Admin   | admin    | admin123    |
 | Student | STU001   | student123  |
+| Faculty | FAC001   | faculty123  |
+| Parent  | PAR001   | parent123   |
+
+Additional demo accounts: students STU002–STU007 (password `student123` /
+`pass007`), faculty FAC002–FAC003, parents PAR002–PAR006.
 
 ## Features
 
-- **Login** — separate admin / student portals with session auth
-- **Admin console** — dashboard stats, manage students (including mobile number),
-  courses, enrollments, assignments (with submission grading), quizzes (builder +
-  auto-grading), daily attendance (present / late / absent)
+- **Login** — separate admin / student / faculty / parent portals with session auth
+- **Admin console** — dashboard stats, manage students (mobile, fee amount & paid
+  status), courses, enrollments, assignments (submission grading), quizzes (builder +
+  auto-grading), daily attendance, batches & timetables, faculty members, parent
+  accounts, exams & result entry, payments & receipts, certificates, SMS/WhatsApp
+  reminders, and a report builder (CSV export)
 - **AI quiz generation** — generate multiple-choice quiz questions from a topic
   using an OpenAI-compatible LLM API
-- **Student portal** — view courses, submit assignments, take quizzes with
-  instant scores, attendance log, and grades
+- **Student portal** — view courses, weekly timetable, submit assignments, take
+  quizzes with instant scores, exams & results, attendance log, grades, fees &
+  payment history, and certificates
+- **Faculty portal** — assigned courses, weekly timetable, student roster, daily
+  attendance marking, and assignment grading
+- **Parent portal** — per-child overview, attendance, fees & payment history, and
+  exam results
 
 ## AI quiz generation (optional)
 
@@ -60,6 +72,19 @@ USER_LLM_MODEL=deepseek-chat
 
 Works with DeepSeek, OpenAI, Groq, and other OpenAI-compatible providers. Without
 a key, the button shows "NOT CONFIGURED" and returns a clear message.
+
+## SMS / WhatsApp reminders (optional)
+
+The Reminders tab lets you send fee and class reminders to students' mobile numbers
+via SMS or WhatsApp. Set **your own** Twilio-compatible credentials in `.env`
+(or in the hosting panel). Without them, reminders are logged as *simulated* so
+you can still see and test the workflow:
+
+```env
+SMS_TWILIO_ACCOUNT_SID=your_account_sid
+SMS_TWILIO_AUTH_TOKEN=your_auth_token
+SMS_TWILIO_FROM=+15551234567
+```
 
 ## Deploying on Hostinger (shared Node.js hosting)
 
@@ -82,11 +107,16 @@ lms/
   server/
     index.js   # Express app + REST API routes
     db.js      # node:sqlite database layer (schema + seed)
+    ai.js      # optional AI quiz generation (env-configured)
+    notify.js  # optional SMS/WhatsApp reminders (env-configured)
+    reports.js # report builders for the admin Reports tab
   public/
     index.html        # landing page
     login.html        # login portal
     admin.html        # admin console
     student.html      # student portal
+    faculty.html      # faculty portal
+    parent.html       # parent portal
     css/style.css
-    js/               # common.js, admin.js, student.js
+    js/               # common.js, admin.js, student.js, faculty.js, parent.js
 ```

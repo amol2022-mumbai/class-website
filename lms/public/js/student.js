@@ -4,10 +4,14 @@ let activeQuiz = null;
 const tabTitles = {
   dashboard: ['// STUDENT / OVERVIEW', 'My Dashboard'],
   courses: ['// STUDENT / COURSES', 'My Courses'],
+  timetable: ['// STUDENT / TIMETABLE', 'Weekly Timetable'],
   assignments: ['// STUDENT / ASSIGNMENTS', 'Assignments'],
   quizzes: ['// STUDENT / QUIZZES', 'Quizzes'],
+  exams: ['// STUDENT / EXAMS', 'Exams & Results'],
   attendance: ['// STUDENT / ATTENDANCE', 'Attendance'],
   grades: ['// STUDENT / GRADES', 'Grades & Results'],
+  fees: ['// STUDENT / FEES', 'Fees & Payments'],
+  certificates: ['// STUDENT / CERTIFICATES', 'My Certificates'],
 };
 
 (async function init() {
@@ -34,10 +38,14 @@ function switchTab(tab) {
 
   if (tab === 'dashboard') loadDashboard();
   else if (tab === 'courses') loadCourses();
+  else if (tab === 'timetable') loadTimetable();
   else if (tab === 'assignments') loadAssignments();
   else if (tab === 'quizzes') loadQuizzes();
+  else if (tab === 'exams') loadExams();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'grades') loadGrades();
+  else if (tab === 'fees') loadFees();
+  else if (tab === 'certificates') loadCertificates();
 }
 
 async function loadDashboard() {
@@ -99,6 +107,72 @@ async function loadCourses() {
       </div>
     </div>
   `).join('') : '<div class="empty-state"><span class="es-icon">⬡</span>No courses enrolled.</div>';
+}
+
+async function loadTimetable() {
+  const timetable = await api('/api/student/timetable');
+  document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
+    <tr>
+      <td class="muted">${esc(t.day)}</td>
+      <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
+      <td><strong>${esc(t.subject)}</strong></td>
+      <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
+      <td>${esc(t.course_code)}</td>
+      <td class="muted">${esc(t.instructor || '—')}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>';
+}
+
+async function loadExams() {
+  const exams = await api('/api/student/exams');
+  document.getElementById('examRows').innerHTML = exams.length ? exams.map(x => {
+    const resultBadge = x.marks != null
+      ? `<span class="badge ${(x.marks / x.max_marks) >= 0.7 ? 'badge-green' : (x.marks / x.max_marks) >= 0.5 ? 'badge-yellow' : 'badge-red'}">${x.marks}/${x.max_marks}</span>`
+      : '<span class="badge badge-yellow">PENDING</span>';
+    return `
+    <tr>
+      <td><strong>${esc(x.title)}</strong></td>
+      <td><span class="badge badge-cyan">${esc(x.course_code)}</span> <span class="muted">${esc(x.course_title)}</span></td>
+      <td class="muted">${esc(x.exam_date || '—')}</td>
+      <td>${x.max_marks}</td>
+      <td>${resultBadge}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled in your courses.</div></td></tr>';
+}
+
+async function loadFees() {
+  const d = await api('/api/student/fees');
+  document.getElementById('feeStatGrid').innerHTML = `
+    <div class="stat-card purple"><div class="stat-num">${fmtMoney(d.fee_amount)}</div><div class="stat-label">Total Fee</div></div>
+    <div class="stat-card green"><div class="stat-num">${fmtMoney(d.total_paid)}</div><div class="stat-label">Paid</div></div>
+    <div class="stat-card ${d.pending > 0 ? 'red' : 'green'}"><div class="stat-num">${fmtMoney(d.pending)}</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-num">${d.fee_paid ? 'PAID' : 'PENDING'}</div><div class="stat-label">Status</div></div>
+  `;
+  document.getElementById('paymentRows').innerHTML = d.payments.length ? d.payments.map(p => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(p.receipt_no)}</span></td>
+      <td class="muted">${esc(p.paid_at || '')}</td>
+      <td class="muted">${esc(p.method || '')}</td>
+      <td class="muted">${esc(p.note || '—')}</td>
+      <td><strong>${fmtMoney(p.amount)}</strong></td>
+    </tr>
+  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded. See the office if you have paid.</div></td></tr>';
+}
+
+async function loadCertificates() {
+  const certs = await api('/api/student/certificates');
+  document.getElementById('certificateRows').innerHTML = certs.length ? certs.map(c => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(c.cert_no)}</span></td>
+      <td>${esc(c.course_code)} — <span class="muted">${esc(c.course_title)}</span></td>
+      <td><span class="badge badge-purple">${esc(c.type)}</span></td>
+      <td class="muted">${esc(c.issued_date || '')}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">⛁</span>No certificates issued yet.</div></td></tr>';
+}
+
+function fmtMoney(n) {
+  return '$' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 async function loadAssignments() {

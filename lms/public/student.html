@@ -25,10 +25,14 @@
       <nav class="side-nav" id="sideNav">
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> My Courses</button>
+        <button class="nav-item" data-tab="timetable"><span class="nav-icon">⧉</span> Timetable</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Assignments</button>
         <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
+        <button class="nav-item" data-tab="exams"><span class="nav-icon">▤</span> Exams</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
-        <button class="nav-item" data-tab="grades"><span class="nav-icon">▤</span> Grades</button>
+        <button class="nav-item" data-tab="grades"><span class="nav-icon">▦</span> Grades</button>
+        <button class="nav-item" data-tab="fees"><span class="nav-icon">₿</span> Fees</button>
+        <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
       </nav>
       <div class="side-footer">
         <div class="side-user">
@@ -64,6 +68,21 @@
         </div>
       </section>
 
+      <!-- Timetable -->
+      <section id="tab-timetable" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Weekly Timetable</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Day</th><th>Time</th><th>Subject</th><th>Batch</th><th>Course</th><th>Instructor</th></tr>
+              </thead>
+              <tbody id="timetableRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Assignments -->
       <section id="tab-assignments" class="tab-panel hidden">
         <div class="panel">
@@ -89,6 +108,21 @@
                 <tr><th>Title</th><th>Course</th><th>Questions</th><th>Time</th><th>Last Score</th><th>Action</th></tr>
               </thead>
               <tbody id="quizRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Exams -->
+      <section id="tab-exams" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Exams & Results</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Exam</th><th>Course</th><th>Date</th><th>Max Marks</th><th>Result</th></tr>
+              </thead>
+              <tbody id="examRows"></tbody>
             </table>
           </div>
         </div>
@@ -125,6 +159,37 @@
             <table>
               <thead><tr><th>Quiz</th><th>Course</th><th>Score</th></tr></thead>
               <tbody id="quizGradeRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Fees -->
+      <section id="tab-fees" class="tab-panel hidden">
+        <div class="stat-grid" id="feeStatGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>Payment History</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Receipt</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th></tr>
+              </thead>
+              <tbody id="paymentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Certificates -->
+      <section id="tab-certificates" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>My Certificates</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Cert No</th><th>Course</th><th>Type</th><th>Issued</th></tr>
+              </thead>
+              <tbody id="certificateRows"></tbody>
             </table>
           </div>
         </div>

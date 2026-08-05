@@ -7,9 +7,17 @@ const tabTitles = {
   students: ['// ADMIN / STUDENTS', 'Student Records'],
   courses: ['// ADMIN / COURSES', 'Course Catalog'],
   enrollments: ['// ADMIN / ENROLLMENTS', 'Enrollment Matrix'],
+  batches: ['// ADMIN / BATCHES', 'Batches & Timetable'],
+  faculty: ['// ADMIN / FACULTY', 'Faculty Members'],
+  parents: ['// ADMIN / PARENTS', 'Parent Accounts'],
   assignments: ['// ADMIN / ASSIGNMENTS', 'Assignments'],
   quizzes: ['// ADMIN / QUIZZES', 'Quizzes'],
+  exams: ['// ADMIN / EXAMS', 'Exams & Results'],
+  payments: ['// ADMIN / PAYMENTS', 'Payments & Receipts'],
+  certificates: ['// ADMIN / CERTIFICATES', 'Certificates'],
+  notifications: ['// ADMIN / REMINDERS', 'Reminders & Notifications'],
   attendance: ['// ADMIN / ATTENDANCE', 'Attendance Tracker'],
+  reports: ['// ADMIN / REPORTS', 'Report Builder'],
 };
 
 (async function init() {
@@ -30,6 +38,12 @@ const tabTitles = {
     else if (tab === 'assignments') openAssignmentModal();
     else if (tab === 'quizzes') openQuizModal();
     else if (tab === 'enrollments') openEnrollmentModal();
+    else if (tab === 'batches') openBatchModal();
+    else if (tab === 'faculty') openFacultyModal();
+    else if (tab === 'parents') openParentModal();
+    else if (tab === 'exams') openExamModal();
+    else if (tab === 'payments') openPaymentModal();
+    else if (tab === 'certificates') openCertificateModal();
   });
 
   switchTab('dashboard');
@@ -51,9 +65,17 @@ function switchTab(tab) {
   else if (tab === 'students') loadStudents();
   else if (tab === 'courses') loadCourses();
   else if (tab === 'enrollments') loadEnrollments();
+  else if (tab === 'batches') loadBatches();
+  else if (tab === 'faculty') loadFaculty();
+  else if (tab === 'parents') loadParents();
   else if (tab === 'assignments') loadAssignments();
   else if (tab === 'quizzes') loadQuizzes();
+  else if (tab === 'exams') loadExams();
+  else if (tab === 'payments') loadPayments();
+  else if (tab === 'certificates') loadCertificates();
+  else if (tab === 'notifications') loadNotifications();
   else if (tab === 'attendance') loadAttendance();
+  else if (tab === 'reports') loadReports();
 }
 
 // ---------- Dashboard ----------
@@ -100,6 +122,7 @@ async function loadStudents() {
       <td><strong>${esc(s.name)}</strong></td>
       <td class="muted">${esc(s.email || '—')}</td>
       <td class="muted">${esc(s.mobile || '—')}</td>
+      <td>${fmtMoney(s.fee_amount)} <span class="badge ${s.fee_paid ? 'badge-green' : 'badge-red'}" style="margin-left:4px">${s.fee_paid ? 'PAID' : 'DUE'}</span></td>
       <td>${s.course_count}</td>
       <td>${s.present_days}</td>
       <td class="table-actions">
@@ -107,7 +130,7 @@ async function loadStudents() {
         <button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id}, '${esc(s.name)}')">DELETE</button>
       </td>
     </tr>
-  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
+  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
 }
 
 function openStudentModal(student) {
@@ -137,6 +160,17 @@ function openStudentModal(student) {
           <label>Mobile Number</label>
           <input type="tel" name="mobile" value="${esc(student ? student.mobile || '' : '')}" placeholder="e.g. +91 98765 43210">
         </div>
+        <div class="field">
+          <label>Fee Amount ($)</label>
+          <input type="number" name="fee_amount" min="0" step="0.01" value="${student ? student.fee_amount || 0 : 0}">
+        </div>
+        <div class="field">
+          <label>Fee Paid</label>
+          <select name="fee_paid">
+            <option value="1" ${student && student.fee_paid ? 'selected' : ''}>Yes — paid</option>
+            <option value="0" ${!student || !student.fee_paid ? 'selected' : ''}>No — pending</option>
+          </select>
+        </div>
         ${isEdit ? `
         <div class="field span-2">
           <label>Reset Password (leave blank to keep)</label>
@@ -153,7 +187,10 @@ function openStudentModal(student) {
   document.getElementById('studentForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const payload = { name: f.get('name'), email: f.get('email'), mobile: f.get('mobile') };
+    const payload = {
+      name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'),
+      fee_amount: Number(f.get('fee_amount')) || 0, fee_paid: Number(f.get('fee_paid')) === 1,
+    };
     try {
       if (isEdit) {
         if (f.get('password')) payload.password = f.get('password');
@@ -162,6 +199,7 @@ function openStudentModal(student) {
         await api('/api/admin/students', { method: 'POST', body: {
           username: f.get('username'), password: f.get('password'),
           name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'),
+          fee_amount: Number(f.get('fee_amount')) || 0, fee_paid: Number(f.get('fee_paid')) === 1,
         }});
       }
       toast(isEdit ? 'Student updated' : 'Student created');
@@ -786,6 +824,807 @@ async function loadAttendance() {
       } catch (err) { toast(err.message, true); }
     });
   });
+}
+
+// ---------- Batches & Timetable ----------
+let activeBatchId = null;
+
+async function loadBatches() {
+  const [batches, courses] = await Promise.all([api('/api/admin/batches'), api('/api/admin/courses')]);
+  window._courses = courses;
+  document.getElementById('batchRows').innerHTML = batches.length ? batches.map(b => `
+    <tr>
+      <td><strong>${esc(b.name)}</strong></td>
+      <td><span class="badge badge-cyan">${esc(b.course_code)}</span> <span class="muted">${esc(b.course_title)}</span></td>
+      <td class="muted">${esc(b.start_date || '—')} → ${esc(b.end_date || '—')}</td>
+      <td>${b.capacity}</td>
+      <td><span class="badge badge-purple">${b.student_count}</span></td>
+      <td>${b.slot_count}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="showBatchDetail(${b.id})">MANAGE</button>
+        <button class="btn btn-ghost btn-sm" onclick='openBatchModal(${JSON.stringify(b)})'>EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBatch(${b.id}, '${esc(b.name)}')">DELETE</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">⧉</span>No batches yet. Create batches to assign students and timetables.</div></td></tr>';
+}
+
+function openBatchModal(batch) {
+  const isEdit = !!batch;
+  showModal(isEdit ? 'Edit Batch' : 'Add Batch', `
+    <form id="batchForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Name</label>
+          <input type="text" name="name" required value="${esc(batch ? batch.name : '')}" placeholder="e.g. CS101 - Batch A">
+        </div>
+        <div class="field">
+          <label>Course</label>
+          <select name="course_id" required ${isEdit ? 'disabled' : ''}>
+            ${(window._courses || []).map(c => `<option value="${c.id}" ${batch && batch.course_id === c.id ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Start Date</label>
+          <input type="date" name="start_date" value="${esc(batch ? batch.start_date || '' : '')}">
+        </div>
+        <div class="field">
+          <label>End Date</label>
+          <input type="date" name="end_date" value="${esc(batch ? batch.end_date || '' : '')}">
+        </div>
+        <div class="field">
+          <label>Capacity</label>
+          <input type="number" name="capacity" min="0" value="${batch ? batch.capacity : 30}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${isEdit ? 'SAVE CHANGES' : 'CREATE BATCH'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('batchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const payload = {
+      name: f.get('name'), start_date: f.get('start_date') || null,
+      end_date: f.get('end_date') || null, capacity: Number(f.get('capacity')) || 0,
+    };
+    try {
+      if (isEdit) {
+        await api('/api/admin/batches/' + batch.id, { method: 'PUT', body: payload });
+      } else {
+        await api('/api/admin/batches', { method: 'POST', body: { ...payload, course_id: Number(f.get('course_id')) } });
+      }
+      toast(isEdit ? 'Batch updated' : 'Batch created');
+      closeModal();
+      loadBatches();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteBatch(id, name) {
+  if (!confirm(`Delete batch "${name}"? Students will be unassigned from it.`)) return;
+  try {
+    await api('/api/admin/batches/' + id, { method: 'DELETE' });
+    toast('Batch deleted');
+    loadBatches();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function showBatchDetail(id) {
+  activeBatchId = id;
+  const d = await api('/api/admin/batches/' + id);
+  document.getElementById('batchDetailTitle').textContent = 'Batch — ' + d.batch.name;
+  document.getElementById('batchDetailPanel').style.display = 'block';
+  renderBatchDetail(d);
+}
+
+function closeBatchDetail() {
+  activeBatchId = null;
+  document.getElementById('batchDetailPanel').style.display = 'none';
+}
+
+function renderBatchDetail(d) {
+  const b = d.batch;
+  document.getElementById('timetableRows').innerHTML = d.timetable.length ? d.timetable.map(t => `
+    <tr>
+      <td class="muted">${esc(t.day)}</td>
+      <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
+      <td><strong>${esc(t.subject)}</strong></td>
+      <td class="muted">${esc(t.instructor || '—')}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteTimetableSlot(${t.id})">DEL</button></td>
+    </tr>
+  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No slots. Add a slot below.</div></td></tr>';
+
+  document.getElementById('batchStudentRows').innerHTML = d.students.length ? d.students.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong> <span class="muted">(${esc(s.username)})</span></td>
+      <td class="muted">${esc(s.mobile || '—')}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="removeFromBatch(${s.id})">REMOVE</button></td>
+    </tr>
+  `).join('') : '<tr><td colspan="3"><div class="empty-state"><span class="es-icon">▣</span>No students in this batch.</div></td></tr>';
+
+  document.getElementById('availableStudentRows').innerHTML = d.availableStudents.length ? d.availableStudents.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong> <span class="muted">(${esc(s.username)})</span></td>
+      <td><button class="btn btn-purple btn-sm" onclick="addToBatch(${s.id})">+ ADD</button></td>
+    </tr>
+  `).join('') : '<tr><td colspan="2"><div class="empty-state"><span class="es-icon">▣</span>No more students available for this batch.</div></td></tr>';
+
+  document.querySelector('#batchDetailPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function addToBatch(sid) {
+  try {
+    await api(`/api/admin/batches/${activeBatchId}/students`, { method: 'POST', body: { student_id: sid } });
+    toast('Student added to batch');
+    showBatchDetail(activeBatchId);
+    loadBatches();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function removeFromBatch(sid) {
+  try {
+    await api(`/api/admin/batches/${activeBatchId}/students/${sid}`, { method: 'DELETE' });
+    toast('Student removed from batch');
+    showBatchDetail(activeBatchId);
+    loadBatches();
+  } catch (err) { toast(err.message, true); }
+}
+
+function openTimetableModal() {
+  showModal('Add Timetable Slot', `
+    <form id="timetableForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Day</label>
+          <select name="day" required>
+            ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+              .map(d => `<option>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Subject</label>
+          <input type="text" name="subject" required placeholder="e.g. Programming Lab">
+        </div>
+        <div class="field">
+          <label>Start Time</label>
+          <input type="time" name="start_time" required value="09:00">
+        </div>
+        <div class="field">
+          <label>End Time</label>
+          <input type="time" name="end_time" required value="10:30">
+        </div>
+        <div class="field span-2">
+          <label>Instructor</label>
+          <input type="text" name="instructor" placeholder="e.g. Dr. Alan Vega">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">ADD SLOT</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('timetableForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api('/api/admin/timetable', { method: 'POST', body: {
+        batch_id: activeBatchId, day: f.get('day'), subject: f.get('subject'),
+        start_time: f.get('start_time'), end_time: f.get('end_time'), instructor: f.get('instructor'),
+      }});
+      toast('Timetable slot added');
+      closeModal();
+      showBatchDetail(activeBatchId);
+      loadBatches();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteTimetableSlot(id) {
+  try {
+    await api('/api/admin/timetable/' + id, { method: 'DELETE' });
+    toast('Slot deleted');
+    showBatchDetail(activeBatchId);
+    loadBatches();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Faculty ----------
+async function loadFaculty() {
+  const [faculty, courses] = await Promise.all([api('/api/admin/faculty'), api('/api/admin/courses')]);
+  window._courses = courses;
+  document.getElementById('facultyRows').innerHTML = faculty.length ? faculty.map(f => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(f.username)}</span></td>
+      <td><strong>${esc(f.name)}</strong></td>
+      <td class="muted">${esc(f.email || '—')}</td>
+      <td class="muted">${esc(f.mobile || '—')}</td>
+      <td>${(f.courses || []).map(c => `<span class="badge badge-purple" style="margin:1px">${esc(c.code)}</span>`).join('') || '—'}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick='openFacultyModal(${JSON.stringify(f)})'>EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteFaculty(${f.id}, '${esc(f.name)}')">DELETE</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">✦</span>No faculty members yet.</div></td></tr>';
+}
+
+function openFacultyModal(faculty) {
+  const isEdit = !!faculty;
+  showModal(isEdit ? 'Edit Faculty' : 'Add Faculty', `
+    <form id="facultyForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" name="name" required value="${esc(faculty ? faculty.name : '')}" placeholder="e.g. Dr. Alan Vega">
+        </div>
+        ${isEdit ? '' : `
+        <div class="field">
+          <label>Faculty ID / Username</label>
+          <input type="text" name="username" required placeholder="e.g. FAC004">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="text" name="password" required placeholder="Initial password">
+        </div>
+        `}
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="${esc(faculty ? faculty.email || '' : '')}">
+        </div>
+        <div class="field">
+          <label>Mobile</label>
+          <input type="tel" name="mobile" value="${esc(faculty ? faculty.mobile || '' : '')}" placeholder="For SMS/WhatsApp">
+        </div>
+        <div class="field span-2">
+          <label>Assigned Courses</label>
+          <select name="course_ids" multiple size="5">
+            ${(window._courses || []).map(c => {
+              const has = faculty && (faculty.courses || []).some(fc => fc.id === c.id);
+              return `<option value="${c.id}" ${has ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`;
+            }).join('')}
+          </select>
+          <small class="muted">Ctrl+click to select multiple courses.</small>
+        </div>
+        ${isEdit ? `
+        <div class="field span-2">
+          <label>Reset Password (leave blank to keep)</label>
+          <input type="text" name="password" placeholder="New password">
+        </div>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${isEdit ? 'SAVE CHANGES' : 'CREATE FACULTY'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('facultyForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const course_ids = [...f.getAll('course_ids')].map(Number);
+    const payload = { name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'), course_ids };
+    try {
+      if (isEdit) {
+        if (f.get('password')) payload.password = f.get('password');
+        await api('/api/admin/faculty/' + faculty.id, { method: 'PUT', body: payload });
+      } else {
+        await api('/api/admin/faculty', { method: 'POST', body: {
+          username: f.get('username'), password: f.get('password'), ...payload,
+        }});
+      }
+      toast(isEdit ? 'Faculty updated' : 'Faculty created');
+      closeModal();
+      loadFaculty();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteFaculty(id, name) {
+  if (!confirm(`Delete faculty "${name}"?`)) return;
+  try {
+    await api('/api/admin/faculty/' + id, { method: 'DELETE' });
+    toast('Faculty deleted');
+    loadFaculty();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Parents ----------
+async function loadParents() {
+  const [parents, students] = await Promise.all([api('/api/admin/parents'), api('/api/admin/students')]);
+  window._students = students;
+  document.getElementById('parentRows').innerHTML = parents.length ? parents.map(p => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(p.username)}</span></td>
+      <td><strong>${esc(p.name)}</strong></td>
+      <td class="muted">${esc(p.email || '—')}</td>
+      <td class="muted">${esc(p.mobile || '—')}</td>
+      <td>${(p.children || []).map(c => `<span class="badge badge-purple" style="margin:1px">${esc(c.username)}</span>`).join('') || '—'}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick='openParentModal(${JSON.stringify(p)})'>EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteParent(${p.id}, '${esc(p.name)}')">DELETE</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">◈</span>No parent accounts yet.</div></td></tr>';
+}
+
+function openParentModal(parent) {
+  const isEdit = !!parent;
+  showModal(isEdit ? 'Edit Parent' : 'Add Parent', `
+    <form id="parentForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" name="name" required value="${esc(parent ? parent.name : '')}" placeholder="e.g. Rajesh Sharma">
+        </div>
+        ${isEdit ? '' : `
+        <div class="field">
+          <label>Parent ID / Username</label>
+          <input type="text" name="username" required placeholder="e.g. PAR007">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="text" name="password" required placeholder="Initial password">
+        </div>
+        `}
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="${esc(parent ? parent.email || '' : '')}">
+        </div>
+        <div class="field">
+          <label>Mobile</label>
+          <input type="tel" name="mobile" value="${esc(parent ? parent.mobile || '' : '')}" placeholder="For SMS/WhatsApp">
+        </div>
+        <div class="field span-2">
+          <label>Linked Children</label>
+          <select name="student_ids" multiple size="5">
+            ${(window._students || []).map(s => {
+              const has = parent && (parent.children || []).some(c => c.id === s.id);
+              return `<option value="${s.id}" ${has ? 'selected' : ''}>${esc(s.name)} (${esc(s.username)})</option>`;
+            }).join('')}
+          </select>
+          <small class="muted">Ctrl+click to select multiple children.</small>
+        </div>
+        ${isEdit ? `
+        <div class="field span-2">
+          <label>Reset Password (leave blank to keep)</label>
+          <input type="text" name="password" placeholder="New password">
+        </div>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${isEdit ? 'SAVE CHANGES' : 'CREATE PARENT'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('parentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const student_ids = [...f.getAll('student_ids')].map(Number);
+    const payload = { name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'), student_ids };
+    try {
+      if (isEdit) {
+        if (f.get('password')) payload.password = f.get('password');
+        await api('/api/admin/parents/' + parent.id, { method: 'PUT', body: payload });
+      } else {
+        await api('/api/admin/parents', { method: 'POST', body: {
+          username: f.get('username'), password: f.get('password'), ...payload,
+        }});
+      }
+      toast(isEdit ? 'Parent updated' : 'Parent created');
+      closeModal();
+      loadParents();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteParent(id, name) {
+  if (!confirm(`Delete parent account "${name}"?`)) return;
+  try {
+    await api('/api/admin/parents/' + id, { method: 'DELETE' });
+    toast('Parent deleted');
+    loadParents();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Exams & Results ----------
+let activeExamId = null;
+let activeExamMax = 100;
+
+async function loadExams() {
+  const [exams, courses] = await Promise.all([api('/api/admin/exams'), api('/api/admin/courses')]);
+  window._courses = courses;
+  document.getElementById('examRows').innerHTML = exams.length ? exams.map(x => `
+    <tr>
+      <td><strong>${esc(x.title)}</strong></td>
+      <td><span class="badge badge-cyan">${esc(x.course_code)}</span></td>
+      <td class="muted">${esc(x.exam_date || '—')}</td>
+      <td>${x.max_marks}</td>
+      <td><span class="badge badge-purple">${x.result_count}</span> <button class="btn btn-ghost btn-sm" onclick="showExamResults(${x.id}, '${esc(x.title)}')">ENTER</button></td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick='openExamModal(${JSON.stringify(x)})'>EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteExam(${x.id}, '${esc(x.title)}')">DELETE</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled yet.</div></td></tr>';
+}
+
+function openExamModal(exam) {
+  const isEdit = !!exam;
+  showModal(isEdit ? 'Edit Exam' : 'Schedule Exam', `
+    <form id="examForm">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Title</label>
+          <input type="text" name="title" required value="${esc(exam ? exam.title : '')}" placeholder="e.g. CS101 Mid-Term">
+        </div>
+        <div class="field">
+          <label>Course</label>
+          <select name="course_id" required ${isEdit ? 'disabled' : ''}>
+            ${(window._courses || []).map(c => `<option value="${c.id}" ${exam && exam.course_id === c.id ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Max Marks</label>
+          <input type="number" name="max_marks" min="1" value="${exam ? exam.max_marks : 100}">
+        </div>
+        <div class="field span-2">
+          <label>Exam Date</label>
+          <input type="date" name="exam_date" value="${esc(exam ? exam.exam_date || '' : '')}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${isEdit ? 'SAVE CHANGES' : 'SCHEDULE EXAM'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('examForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const payload = { title: f.get('title'), exam_date: f.get('exam_date') || null, max_marks: Number(f.get('max_marks')) || 100 };
+    try {
+      if (isEdit) {
+        await api('/api/admin/exams/' + exam.id, { method: 'PUT', body: payload });
+      } else {
+        await api('/api/admin/exams', { method: 'POST', body: { ...payload, course_id: Number(f.get('course_id')) } });
+      }
+      toast(isEdit ? 'Exam updated' : 'Exam scheduled');
+      closeModal();
+      loadExams();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteExam(id, title) {
+  if (!confirm(`Delete exam "${title}"?`)) return;
+  try {
+    await api('/api/admin/exams/' + id, { method: 'DELETE' });
+    toast('Exam deleted');
+    loadExams();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function showExamResults(id, title) {
+  activeExamId = id;
+  const d = await api(`/api/admin/exams/${id}/results`);
+  activeExamMax = d.exam.max_marks;
+  document.getElementById('examResultsTitle').textContent = 'Enter Results — ' + title;
+  document.getElementById('examResultsPanel').style.display = 'block';
+  document.getElementById('examResultRows').innerHTML = d.rows.length ? d.rows.map(r => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong> <span class="muted">(${esc(r.username)})</span></td>
+      <td><input type="number" id="em-${r.id}" min="0" max="${d.exam.max_marks}" value="${r.marks != null ? r.marks : ''}"
+                 placeholder="—" style="width:90px;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px"></td>
+      <td class="muted">${d.exam.max_marks}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="3"><div class="empty-state"><span class="es-icon">▤</span>No students enrolled in this course.</div></td></tr>';
+}
+
+function closeExamResults() {
+  activeExamId = null;
+  document.getElementById('examResultsPanel').style.display = 'none';
+}
+
+async function saveExamResults() {
+  const marks = {};
+  document.querySelectorAll('#examResultRows input').forEach(inp => {
+    if (inp.value !== '') marks[inp.id.replace('em-', '')] = Number(inp.value);
+  });
+  if (!Object.keys(marks).length) return toast('Enter at least one mark', true);
+  try {
+    await api(`/api/admin/exams/${activeExamId}/results`, { method: 'POST', body: { marks } });
+    toast('Results saved');
+    showExamResults(activeExamId, document.getElementById('examResultsTitle').textContent.replace('Enter Results — ', ''));
+    loadExams();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Payments & Receipts ----------
+async function loadPayments() {
+  const [payments, students] = await Promise.all([api('/api/admin/payments'), api('/api/admin/students')]);
+  window._students = students;
+  document.getElementById('paymentRows').innerHTML = payments.length ? payments.map(p => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(p.receipt_no)}</span></td>
+      <td><strong>${esc(p.student_name)}</strong> <span class="muted">(${esc(p.username)})</span></td>
+      <td class="muted">${esc(p.paid_at || '')}</td>
+      <td class="muted">${esc(p.method || '')}</td>
+      <td class="muted">${esc(p.note || '—')}</td>
+      <td><strong>${fmtMoney(p.amount)}</strong></td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="viewReceipt(${p.id})">RECEIPT</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id}, '${esc(p.receipt_no)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded yet.</div></td></tr>';
+}
+
+function openPaymentModal() {
+  showModal('Record Payment', `
+    <form id="paymentForm">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Student</label>
+          <select name="student_id" required>
+            <option value="">Select student...</option>
+            ${(window._students || []).map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Amount ($)</label>
+          <input type="number" name="amount" min="0.01" step="0.01" required placeholder="e.g. 600">
+        </div>
+        <div class="field">
+          <label>Method</label>
+          <select name="method">
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="upi">UPI</option>
+            <option value="bank">Bank Transfer</option>
+          </select>
+        </div>
+        <div class="field span-2">
+          <label>Note</label>
+          <input type="text" name="note" placeholder="e.g. First installment">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">RECORD PAYMENT</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('paymentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api('/api/admin/payments', { method: 'POST', body: {
+        student_id: Number(f.get('student_id')), amount: Number(f.get('amount')),
+        method: f.get('method'), note: f.get('note'),
+      }});
+      toast('Payment recorded');
+      closeModal();
+      loadPayments();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function viewReceipt(id) {
+  const p = await api(`/api/admin/payments/${id}/receipt`);
+  showModal('Payment Receipt — ' + p.receipt_no, `
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-family:var(--font-display);font-size:20px;font-weight:700">VUMCA <span style="color:var(--cyan)">hITECH</span> Computing</div>
+      <div class="muted">OFFICIAL PAYMENT RECEIPT</div>
+    </div>
+    <div class="receipt-grid">
+      <div><span class="muted">Receipt No</span><div><strong>${esc(p.receipt_no)}</strong></div></div>
+      <div><span class="muted">Date</span><div><strong>${esc(p.paid_at || '—')}</strong></div></div>
+      <div><span class="muted">Student</span><div><strong>${esc(p.student_name)}</strong> (${esc(p.username)})</div></div>
+      <div><span class="muted">Method</span><div><strong>${esc(p.method || '—')}</strong></div></div>
+      <div class="span-2"><span class="muted">Note</span><div>${esc(p.note || '—')}</div></div>
+      <div class="span-2" style="text-align:right;font-size:22px;font-weight:700;color:var(--green)">${fmtMoney(p.amount)}</div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+      <button class="btn btn-purple" onclick="window.print()">PRINT</button>
+    </div>
+  `);
+}
+
+async function deletePayment(id, receiptNo) {
+  if (!confirm(`Delete receipt ${receiptNo}?`)) return;
+  try {
+    await api('/api/admin/payments/' + id, { method: 'DELETE' });
+    toast('Payment deleted');
+    loadPayments();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Certificates ----------
+async function loadCertificates() {
+  const [certificates, students, courses] = await Promise.all([
+    api('/api/admin/certificates'), api('/api/admin/students'), api('/api/admin/courses'),
+  ]);
+  window._students = students;
+  window._courses = courses;
+  document.getElementById('certificateRows').innerHTML = certificates.length ? certificates.map(c => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(c.cert_no)}</span></td>
+      <td><strong>${esc(c.student_name)}</strong> <span class="muted">(${esc(c.username)})</span></td>
+      <td>${esc(c.course_code)} — <span class="muted">${esc(c.course_title)}</span></td>
+      <td><span class="badge badge-purple">${esc(c.type)}</span></td>
+      <td class="muted">${esc(c.issued_date || '')}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="viewCertificate(${c.id}, ${c.student_id}, ${c.course_id})">VIEW</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCertificate(${c.id}, '${esc(c.cert_no)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⛁</span>No certificates issued yet.</div></td></tr>';
+}
+
+function openCertificateModal() {
+  showModal('Issue Certificate', `
+    <form id="certificateForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Student</label>
+          <select name="student_id" required>
+            <option value="">Select student...</option>
+            ${(window._students || []).map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Course</label>
+          <select name="course_id" required>
+            <option value="">Select course...</option>
+            ${(window._courses || []).map(c => `<option value="${c.id}">${esc(c.code)} — ${esc(c.title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field span-2">
+          <label>Type</label>
+          <select name="type">
+            <option value="completion">Course Completion</option>
+            <option value="achievement">Achievement</option>
+            <option value="participation">Participation</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">ISSUE CERTIFICATE</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('certificateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api('/api/admin/certificates', { method: 'POST', body: {
+        student_id: Number(f.get('student_id')), course_id: Number(f.get('course_id')), type: f.get('type'),
+      }});
+      toast('Certificate issued');
+      closeModal();
+      loadCertificates();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function viewCertificate(id, studentId, courseId) {
+  const [students, courses] = await Promise.all([api('/api/admin/students'), api('/api/admin/courses')]);
+  const student = students.find(s => s.id === studentId);
+  const course = courses.find(c => c.id === courseId);
+  showModal('Certificate', `
+    <div class="certificate">
+      <div class="cert-org">VUMCA <span style="color:var(--cyan)">hITECH</span> Computing</div>
+      <div class="cert-title">CERTIFICATE OF COMPLETION</div>
+      <div class="cert-sub">This is to certify that</div>
+      <div class="cert-name">${esc(student ? student.name : 'Student')}</div>
+      <div class="cert-sub">has successfully completed the course</div>
+      <div class="cert-course">${esc(course ? course.title : '')}</div>
+      <div class="cert-sub" style="margin-top:16px">Awarded for demonstrating proficiency in the subject matter.</div>
+      <div class="cert-footer">
+        <div class="muted">Authorized Signature<br><em>Principal</em></div>
+        <div class="muted" style="text-align:right">VUMCA hITECH Computing<br><em>${esc(course ? course.code : '')}</em></div>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+      <button class="btn btn-purple" onclick="window.print()">PRINT</button>
+    </div>
+  `);
+}
+
+async function deleteCertificate(id, certNo) {
+  if (!confirm(`Revoke certificate ${certNo}?`)) return;
+  try {
+    await api('/api/admin/certificates/' + id, { method: 'DELETE' });
+    toast('Certificate deleted');
+    loadCertificates();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Notifications / Reminders ----------
+async function loadNotifications() {
+  const [notifications, students] = await Promise.all([api('/api/admin/notifications'), api('/api/admin/students')]);
+  window._students = students;
+  const sel = document.getElementById('notifyStudents');
+  sel.innerHTML = students.map(s =>
+    `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})${s.mobile ? '' : ' — no mobile'}</option>`
+  ).join('');
+  try {
+    const { configured } = await api('/api/admin/notifications/status');
+    const badge = document.getElementById('notifyStatusBadge');
+    badge.textContent = configured ? 'SMS SERVICE READY' : 'SMS NOT CONFIGURED — SIMULATION MODE';
+    badge.classList.toggle('badge-purple', configured);
+    badge.classList.toggle('badge-yellow', !configured);
+  } catch (_) {}
+  document.getElementById('notificationRows').innerHTML = notifications.length ? notifications.map(n => `
+    <tr>
+      <td><strong>${esc(n.student_name)}</strong> <span class="muted">(${esc(n.username)})</span></td>
+      <td><span class="badge badge-cyan">${esc(n.channel)}</span></td>
+      <td><span class="badge badge-purple">${esc(n.purpose)}</span></td>
+      <td class="muted">${esc(n.message || '—')}</td>
+      <td><span class="badge ${n.status === 'sent' ? 'badge-green' : 'badge-red'}">${esc(n.status)}</span></td>
+      <td class="muted">${esc(n.sent_at || '')}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">✉</span>No notifications sent yet.</div></td></tr>';
+}
+
+async function sendNotifications() {
+  const channel = document.getElementById('notifyChannel').value;
+  const purpose = document.getElementById('notifyPurpose').value;
+  const student_ids = [...document.getElementById('notifyStudents').selectedOptions].map(o => Number(o.value));
+  const message = document.getElementById('notifyMessage').value.trim();
+  if (!student_ids.length) return toast('Select at least one student', true);
+  try {
+    const res = await api('/api/admin/notifications/send-all', {
+      method: 'POST', body: { channel, purpose, student_ids, message: message || undefined },
+    });
+    toast(`Sent ${res.sent} reminder(s)`);
+    document.getElementById('notifyMessage').value = '';
+    document.getElementById('notifyStudents').selectedIndex = -1;
+    loadNotifications();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Reports ----------
+let reportCache = null;
+
+async function loadReports() {
+  const type = document.getElementById('reportType').value;
+  const report = await api('/api/admin/reports/' + type);
+  reportCache = report;
+  const view = document.getElementById('reportsView');
+  view.innerHTML = `
+    <div class="stat-grid" style="margin-bottom:16px">
+      ${report.summary.map(s => `
+        <div class="stat-card purple"><div class="stat-num">${esc(s.value)}</div><div class="stat-label">${esc(s.label)}</div></div>
+      `).join('')}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${report.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${report.rows.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function exportCsv() {
+  if (!reportCache) return toast('Generate a report first', true);
+  const rows = [reportCache.columns, ...reportCache.rows];
+  const csv = rows.map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = reportCache.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function fmtMoney(n) {
+  return '$' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 // ---------- Modal helpers ----------

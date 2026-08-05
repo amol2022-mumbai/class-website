@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parent Portal // VUMCA LMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <div class="dash">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <div class="brand">
+          <span class="logo-icon">◈</span>
+          <div>VUMCA <span class="accent">hITECH</span> LMS</div>
+        </div>
+        <span class="role-tag">PARENT PORTAL</span>
+      </div>
+      <nav class="side-nav" id="sideNav">
+        <button class="nav-item active" data-tab="overview"><span class="nav-icon">◉</span> Overview</button>
+        <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
+        <button class="nav-item" data-tab="fees"><span class="nav-icon">₿</span> Fees & Payments</button>
+        <button class="nav-item" data-tab="results"><span class="nav-icon">▤</span> Exam Results</button>
+      </nav>
+      <div class="side-footer">
+        <div class="side-user">
+          <div class="su-name" id="userName">—</div>
+          <div class="su-id" id="userId">@parent</div>
+        </div>
+        <button class="btn btn-ghost btn-full" style="width:100%" onclick="logout()">LOG OUT</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1>
+          <span class="tag" id="pageTag">// PARENT / OVERVIEW</span>
+          <span id="pageTitle">My Children</span>
+        </h1>
+        <div class="field" style="margin:0">
+          <select id="childSelect">
+            <option value="">Select child...</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Overview -->
+      <section id="tab-overview" class="tab-panel">
+        <div class="stat-grid" id="statGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>Enrolled Courses</h2></div>
+          <div class="course-grid" id="courseGrid"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Latest Attendance</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Course</th><th>Status</th></tr></thead>
+              <tbody id="attRecentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Attendance -->
+      <section id="tab-attendance" class="tab-panel hidden">
+        <div class="stat-grid" id="attStatGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>Attendance Log</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Course</th><th>Status</th></tr></thead>
+              <tbody id="attendanceRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Fees -->
+      <section id="tab-fees" class="tab-panel hidden">
+        <div class="stat-grid" id="feeStatGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>Payment History</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Receipt</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th></tr></thead>
+              <tbody id="paymentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Results -->
+      <section id="tab-results" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Exam Results</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Exam</th><th>Course</th><th>Marks</th><th>Max</th><th>Percentage</th></tr></thead>
+              <tbody id="resultRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script src="js/parent.js"></script>
+</body>
+</html>

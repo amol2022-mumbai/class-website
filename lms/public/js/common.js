@@ -32,11 +32,18 @@ function esc(str) {
   return div.innerHTML;
 }
 
+function roleHome(role) {
+  return role === 'admin' ? '/admin.html'
+    : role === 'faculty' ? '/faculty.html'
+    : role === 'parent' ? '/parent.html'
+    : '/student.html';
+}
+
 async function requireAuth(expectedRole) {
   try {
     const { user } = await api('/api/auth/me');
     if (expectedRole && user.role !== expectedRole) {
-      window.location.href = user.role === 'admin' ? '/admin.html' : '/student.html';
+      window.location.href = roleHome(user.role);
       return null;
     }
     return user;

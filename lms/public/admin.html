@@ -27,9 +27,17 @@
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> Courses</button>
         <button class="nav-item" data-tab="enrollments"><span class="nav-icon">⇄</span> Enrollments</button>
+        <button class="nav-item" data-tab="batches"><span class="nav-icon">⧉</span> Batches & Timetable</button>
+        <button class="nav-item" data-tab="faculty"><span class="nav-icon">✦</span> Faculty</button>
+        <button class="nav-item" data-tab="parents"><span class="nav-icon">◈</span> Parents</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Assignments</button>
         <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
+        <button class="nav-item" data-tab="exams"><span class="nav-icon">▤</span> Exams & Results</button>
+        <button class="nav-item" data-tab="payments"><span class="nav-icon">₿</span> Payments</button>
+        <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
+        <button class="nav-item" data-tab="notifications"><span class="nav-icon">✉</span> Reminders</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
+        <button class="nav-item" data-tab="reports"><span class="nav-icon">▦</span> Reports</button>
       </nav>
       <div class="side-footer">
         <div class="side-user">
@@ -76,7 +84,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Courses</th><th>Present Days</th><th>Actions</th>
+                  <th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Fee</th><th>Courses</th><th>Present Days</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody id="studentRows"></tbody>
@@ -116,6 +124,89 @@
             <table>
               <thead><tr><th>Student</th><th>Course</th><th>Enrolled</th><th>Actions</th></tr></thead>
               <tbody id="enrollmentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Batches & Timetable -->
+      <section id="tab-batches" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Batches</h2>
+            <button class="btn btn-purple btn-small" onclick="openBatchModal()">+ ADD BATCH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Course</th><th>Duration</th><th>Capacity</th><th>Students</th><th>Slots</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="batchRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel" id="batchDetailPanel" style="display:none">
+          <div class="panel-header">
+            <h2 id="batchDetailTitle">Batch Detail</h2>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-purple btn-small" onclick="openTimetableModal()">+ ADD SLOT</button>
+              <button class="btn btn-ghost btn-small" onclick="closeBatchDetail()">CLOSE</button>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-bottom:14px">
+            <table>
+              <thead><tr><th>Day</th><th>Time</th><th>Subject</th><th>Instructor</th><th></th></tr></thead>
+              <tbody id="timetableRows"></tbody>
+            </table>
+          </div>
+          <div class="panel-header"><h2>Students in Batch</h2></div>
+          <div class="table-wrap" style="margin-bottom:14px">
+            <table>
+              <thead><tr><th>Student</th><th>Mobile</th><th></th></tr></thead>
+              <tbody id="batchStudentRows"></tbody>
+            </table>
+          </div>
+          <div class="panel-header"><h2>Add Students</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Student</th><th></th></tr></thead>
+              <tbody id="availableStudentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Faculty -->
+      <section id="tab-faculty" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Faculty Members</h2>
+            <button class="btn btn-purple btn-small" onclick="openFacultyModal()">+ ADD FACULTY</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Courses</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="facultyRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Parents -->
+      <section id="tab-parents" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Parent Accounts</h2>
+            <button class="btn btn-purple btn-small" onclick="openParentModal()">+ ADD PARENT</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Children</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="parentRows"></tbody>
             </table>
           </div>
         </div>
@@ -173,6 +264,128 @@
         </div>
       </section>
 
+      <!-- Exams & Results -->
+      <section id="tab-exams" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Exams</h2>
+            <button class="btn btn-purple btn-small" onclick="openExamModal()">+ ADD EXAM</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Title</th><th>Course</th><th>Date</th><th>Max Marks</th><th>Results</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="examRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel" id="examResultsPanel" style="display:none">
+          <div class="panel-header">
+            <h2 id="examResultsTitle">Enter Results</h2>
+            <button class="btn btn-ghost btn-small" onclick="closeExamResults()">CLOSE</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Student</th><th>Marks</th><th>Max</th></tr></thead>
+              <tbody id="examResultRows"></tbody>
+            </table>
+          </div>
+          <div class="modal-actions" style="padding:16px 0 0">
+            <button class="btn btn-purple" onclick="saveExamResults()">SAVE ALL MARKS</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Payments -->
+      <section id="tab-payments" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Payments & Receipts</h2>
+            <button class="btn btn-purple btn-small" onclick="openPaymentModal()">+ RECORD PAYMENT</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Receipt</th><th>Student</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="paymentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Certificates -->
+      <section id="tab-certificates" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Certificates</h2>
+            <button class="btn btn-purple btn-small" onclick="openCertificateModal()">+ ISSUE CERTIFICATE</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Cert No</th><th>Student</th><th>Course</th><th>Type</th><th>Issued</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="certificateRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Notifications / Reminders -->
+      <section id="tab-notifications" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Send Reminders</h2>
+            <span class="badge badge-purple" id="notifyStatusBadge">checking...</span>
+          </div>
+          <div class="notify-form" style="padding:16px 0">
+            <div class="form-grid">
+              <div class="field">
+                <label>Channel</label>
+                <select id="notifyChannel">
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Purpose</label>
+                <select id="notifyPurpose">
+                  <option value="fee">Fee Reminder</option>
+                  <option value="class">Class Reminder</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="field span-2">
+                <label>Recipients</label>
+                <select id="notifyStudents" multiple size="6">
+                </select>
+                <small class="muted">Ctrl+click to select multiple students.</small>
+              </div>
+              <div class="field span-2">
+                <label>Custom Message (optional — auto-generated if left blank)</label>
+                <textarea id="notifyMessage" rows="2" placeholder="Leave blank for auto message"></textarea>
+              </div>
+            </div>
+            <div class="modal-actions" style="padding-top:8px">
+              <button class="btn btn-purple" onclick="sendNotifications()">SEND REMINDERS</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Notification Log</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Student</th><th>Channel</th><th>Purpose</th><th>Message</th><th>Status</th><th>Sent</th></tr>
+              </thead>
+              <tbody id="notificationRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Attendance -->
       <section id="tab-attendance" class="tab-panel hidden">
         <div class="panel">
@@ -186,6 +399,33 @@
             </div>
           </div>
           <div id="attendanceView"></div>
+        </div>
+      </section>
+
+      <!-- Reports -->
+      <section id="tab-reports" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Report Builder</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <select id="reportType">
+                  <option value="students">Students</option>
+                  <option value="fees">Fees</option>
+                  <option value="attendance">Attendance</option>
+                  <option value="grades">Assignment Grades</option>
+                  <option value="quizzes">Quiz Results</option>
+                  <option value="courses">Course Enrollment</option>
+                  <option value="payments">Payments</option>
+                  <option value="exams">Exam Results</option>
+                </select>
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadReports()">GENERATE</button>
+              <button class="btn btn-ghost btn-small" onclick="exportCsv()">EXPORT CSV</button>
+              <button class="btn btn-ghost btn-small" onclick="window.print()">PRINT</button>
+            </div>
+          </div>
+          <div id="reportsView"></div>
         </div>
       </section>
     </main>
