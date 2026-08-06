@@ -908,7 +908,7 @@ app.post('/api/admin/notifications/send-all', requireAdmin, async (req, res) => 
 function defaultReminder(student, purpose) {
   const name = student.name.split(' ')[0];
   if (purpose === 'fee') {
-    const status = student.fee_paid ? 'your fee has been cleared' : `your fee of $${student.fee_amount || 0} is still pending`;
+    const status = student.fee_paid ? 'your fee has been cleared' : `your fee of Rs. ${student.fee_amount || 0} is still pending`;
     return `Hi ${name}, ${status}. Please contact the office. - VUMCA hITECH Computing`;
   }
   if (purpose === 'class') {
