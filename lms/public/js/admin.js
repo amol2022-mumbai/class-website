@@ -1235,19 +1235,22 @@ let activeExamMax = 100;
 async function loadExams() {
   const [exams, courses] = await Promise.all([api('/api/admin/exams'), api('/api/admin/courses')]);
   window._courses = courses;
+  window._exams = exams;
   document.getElementById('examRows').innerHTML = exams.length ? exams.map(x => `
     <tr>
       <td><strong>${esc(x.title)}</strong></td>
       <td><span class="badge badge-cyan">${esc(x.course_code)}</span></td>
       <td class="muted">${esc(x.exam_date || '—')}</td>
       <td>${x.max_marks}</td>
+      <td>${x.question_count ? `${x.question_count} Q` : '—'}${x.duration_minutes ? ` · ${x.duration_minutes} min` : ''}</td>
       <td><span class="badge badge-purple">${x.result_count}</span> <button class="btn btn-ghost btn-sm" onclick="showExamResults(${x.id}, '${esc(x.title)}')">ENTER</button></td>
       <td class="table-actions">
+        <button class="btn btn-purple btn-sm" onclick="openExamQuestions(${x.id}, '${esc(x.title)}')">QUESTIONS</button>
         <button class="btn btn-ghost btn-sm" onclick='openExamModal(${JSON.stringify(x)})'>EDIT</button>
         <button class="btn btn-danger btn-sm" onclick="deleteExam(${x.id}, '${esc(x.title)}')">DELETE</button>
       </td>
     </tr>
-  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled yet.</div></td></tr>';
+  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled yet.</div></td></tr>';
 }
 
 function openExamModal(exam) {
@@ -1269,6 +1272,10 @@ function openExamModal(exam) {
           <label>Max Marks</label>
           <input type="number" name="max_marks" min="1" value="${exam ? exam.max_marks : 100}">
         </div>
+        <div class="field">
+          <label>Duration (minutes, 0 = no timer)</label>
+          <input type="number" name="duration_minutes" min="0" value="${exam ? exam.duration_minutes || 0 : 0}">
+        </div>
         <div class="field span-2">
           <label>Exam Date</label>
           <input type="date" name="exam_date" value="${esc(exam ? exam.exam_date || '' : '')}">
@@ -1283,7 +1290,7 @@ function openExamModal(exam) {
   document.getElementById('examForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const payload = { title: f.get('title'), exam_date: f.get('exam_date') || null, max_marks: Number(f.get('max_marks')) || 100 };
+    const payload = { title: f.get('title'), exam_date: f.get('exam_date') || null, max_marks: Number(f.get('max_marks')) || 100, duration_minutes: Number(f.get('duration_minutes')) || 0 };
     try {
       if (isEdit) {
         await api('/api/admin/exams/' + exam.id, { method: 'PUT', body: payload });
@@ -1295,6 +1302,94 @@ function openExamModal(exam) {
       loadExams();
     } catch (err) { toast(err.message, true); }
   });
+}
+
+async function openExamQuestions(id, title) {
+  const { exam, questions } = await api(`/api/admin/exams/${id}/questions`);
+  showModal('Question Paper — ' + title, `
+    <div class="alert" style="margin-bottom:14px">
+      <strong>${questions.length}</strong> question(s), max marks: <strong>${exam.max_marks}</strong>.
+      Students can take this exam online once the paper is published. Add questions below.
+    </div>
+    <div id="eqList"></div>
+    <form id="eqForm">
+      <div class="panel" style="padding:14px;margin-top:12px">
+        <div class="form-grid">
+          <div class="field span-2">
+            <label>Question</label>
+            <input type="text" name="text" required placeholder="e.g. Which data structure uses FIFO?">
+          </div>
+          ${[0, 1, 2, 3].map(i => `
+            <div class="field">
+              <label>Option ${String.fromCharCode(65 + i)}</label>
+              <input type="text" name="opt${i}" required placeholder="Option ${String.fromCharCode(65 + i)}">
+            </div>
+          `).join('')}
+          <div class="field">
+            <label>Correct Option</label>
+            <select name="correct_index">
+              ${[0, 1, 2, 3].map(i => `<option value="${i}">${String.fromCharCode(65 + i)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Marks</label>
+            <input type="number" name="marks" min="0" step="0.5" value="1">
+          </div>
+        </div>
+        <div class="modal-actions" style="margin:12px 0 0">
+          <button type="submit" class="btn btn-purple">ADD QUESTION</button>
+        </div>
+      </div>
+    </form>
+  `);
+  const render = () => {
+    const list = document.getElementById('eqList');
+    if (!list) return;
+    list.innerHTML = questions.length ? questions.map((q, qi) => `
+      <div class="panel" style="padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+          <div>
+            <strong>${qi + 1}. ${esc(q.text)}</strong>
+            <div class="muted" style="margin-top:4px">${q.options.map((o, oi) =>
+              `<span class="badge ${oi === q.correct_index ? 'badge-green' : ''}" style="margin-right:6px">${String.fromCharCode(65 + oi)}. ${esc(o)}</span>`
+            ).join('')} <span class="badge badge-purple">${q.marks} mark${q.marks !== 1 ? 's' : ''}</span></div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="deleteExamQuestion(${id}, ${q.id}, ${q.marks})">DEL</button>
+        </div>
+      </div>
+    `).join('') : '<div class="empty-state"><span class="es-icon">▤</span>No questions yet. Add the first one below.</div>';
+  };
+  render();
+  document.getElementById('eqForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const options = [0, 1, 2, 3].map(i => String(f.get('opt' + i)).trim()).filter(Boolean);
+    if (options.length < 2) return toast('At least two options are required', true);
+    try {
+      const added = await api(`/api/admin/exams/${id}/questions`, { method: 'POST', body: {
+        text: f.get('text'), options, correct_index: Number(f.get('correct_index')), marks: Number(f.get('marks')) || 1,
+      }});
+      toast('Question added');
+      f.set('text', '');
+      [0, 1, 2, 3].forEach(i => f.set('opt' + i, ''));
+      const { questions: updated } = await api(`/api/admin/exams/${id}/questions`);
+      questions.length = 0; questions.push(...updated);
+      render();
+      document.querySelector('#eqList').closest('.modal').querySelector('.alert').innerHTML = `Updated: <strong>${questions.length}</strong> question(s), max marks <strong>${updated.reduce((s, q) => s + q.marks, 0)}</strong>.`;
+      loadExams();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteExamQuestion(examId, qid) {
+  if (!confirm('Delete this question?')) return;
+  try {
+    await api(`/api/admin/exams/${examId}/questions/${qid}`, { method: 'DELETE' });
+    toast('Question deleted');
+    loadExams();
+    const examRow = (window._exams || []).find(x => x.id === examId);
+    if (examRow) openExamQuestions(examId, examRow.title);
+  } catch (err) { toast(err.message, true); }
 }
 
 async function deleteExam(id, title) {

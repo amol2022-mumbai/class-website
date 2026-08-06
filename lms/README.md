@@ -45,13 +45,18 @@ Additional demo accounts: students STU002–STU007 (password `student123` /
 - **Admin console** — dashboard stats, manage students (mobile, fee amount & paid
   status), courses, enrollments, assignments (submission grading), quizzes (builder +
   auto-grading), daily attendance, batches & timetables, faculty members, parent
-  accounts, exams & result entry, payments & receipts, certificates, SMS/WhatsApp
-  reminders, and a report builder (CSV export)
+  accounts, exams & result entry (plus an online question-paper builder), payments &
+  receipts, certificates, SMS/WhatsApp reminders, and a report builder (CSV export)
 - **AI quiz generation** — generate multiple-choice quiz questions from a topic
   using an OpenAI-compatible LLM API
+- **Online exams** — admins build a timed MCQ question paper per exam; students take
+  it in-app with a countdown timer, it auto-grades, and the result appears in the
+  student/parent portals and exam reports
+- **Online fee payment (Razorpay)** — students and parents pay pending fees with
+  UPI/cards via Razorpay; the app records the receipt and sends it by WhatsApp
 - **Student portal** — view courses, weekly timetable, submit assignments, take
   quizzes with instant scores, exams & results, attendance log, grades, fees &
-  payment history, and certificates
+  payment history (with online payment), and certificates
 - **Faculty portal** — assigned courses, weekly timetable, student roster, daily
   attendance marking, and assignment grading
 - **Parent portal** — per-child overview, attendance, fees & payment history, and
@@ -96,6 +101,25 @@ SMS_TWILIO_FROM=+15551234567
   the Twilio console (Messaging → Senders) or the API returns an error and the
   reminder shows as `failed` in the log.
 - Ten-digit Indian numbers are assumed to be `+91` prefixed automatically.
+
+## Online fee payments (Razorpay, optional)
+
+The Fees tab in the student and parent portals shows a **Pay Online** button when
+Razorpay is configured and the student has pending dues. Add your own keys to `.env`
+(or the hosting panel). Use test keys (`rzp_test_*`) while testing:
+
+```env
+USER_RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+USER_RAZORPAY_KEY_SECRET=your_key_secret
+```
+
+- Creates a Razorpay order for the exact pending amount (INR), opens the Razorpay
+  checkout (UPI / cards / netbanking), verifies the payment signature on the server,
+  records it in Payments with a receipt number, marks the fee paid when cleared, and
+  sends a WhatsApp receipt to the student's mobile.
+- Razorpay **webhooks are not required** — verification uses the checkout signature.
+- To accept real money, set the **payment capture** and live keys, and add the
+  domain under Razorpay → Settings → Website & App.
 
 ## Deploying on Hostinger (shared Node.js hosting)
 

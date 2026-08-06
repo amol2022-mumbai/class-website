@@ -128,16 +128,102 @@ async function loadExams() {
   document.getElementById('examRows').innerHTML = exams.length ? exams.map(x => {
     const resultBadge = x.marks != null
       ? `<span class="badge ${(x.marks / x.max_marks) >= 0.7 ? 'badge-green' : (x.marks / x.max_marks) >= 0.5 ? 'badge-yellow' : 'badge-red'}">${x.marks}/${x.max_marks}</span>`
-      : '<span class="badge badge-yellow">PENDING</span>';
+      : x.question_count > 0
+        ? '<span class="badge badge-yellow">NOT ATTEMPTED</span>'
+        : '<span class="badge badge-yellow">PENDING</span>';
+    const paper = x.question_count > 0
+      ? (x.marks != null
+          ? `<span class="muted">${x.question_count} Q${x.duration_minutes ? ' · ' + x.duration_minutes + ' min' : ''}</span>`
+          : `<button class="btn btn-purple btn-sm" onclick="startExam(${x.id}, '${esc(x.title)}')">TAKE EXAM</button>`)
+      : '<span class="muted">—</span>';
     return `
     <tr>
       <td><strong>${esc(x.title)}</strong></td>
       <td><span class="badge badge-cyan">${esc(x.course_code)}</span> <span class="muted">${esc(x.course_title)}</span></td>
       <td class="muted">${esc(x.exam_date || '—')}</td>
       <td>${x.max_marks}</td>
+      <td>${paper}</td>
       <td>${resultBadge}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled in your courses.</div></td></tr>';
+  }).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled in your courses.</div></td></tr>';
+}
+
+let examTimer = null;
+let examEndsAt = 0;
+
+async function startExam(id, title) {
+  try {
+    const paper = await api('/api/student/exams/' + id + '/paper');
+    showModal('Exam: ' + title, `
+      <div class="alert alert-success" style="margin-bottom:14px">
+        <strong>${paper.questions.length} questions</strong> · ${paper.exam.max_marks} marks
+        ${paper.exam.duration_minutes ? ` · <span class="badge badge-yellow" id="examTimer">${paper.exam.duration_minutes}:00 left</span>` : ' · no time limit'}
+      </div>
+      <div id="examQuestions"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="cancelExam()">CANCEL</button>
+        <button type="button" class="btn btn-purple" onclick="submitExam(${id})">SUBMIT EXAM</button>
+      </div>
+    `);
+    renderExamPaper(paper.questions);
+    if (paper.exam.duration_minutes) {
+      examEndsAt = Date.now() + paper.exam.duration_minutes * 60000;
+      clearInterval(examTimer);
+      examTimer = setInterval(() => {
+        const left = examEndsAt - Date.now();
+        if (left <= 0) { clearInterval(examTimer); submitExam(id); return; }
+        const el = document.getElementById('examTimer');
+        const m = Math.floor(left / 60000);
+        const s = Math.floor((left % 60000) / 1000);
+        if (el) el.textContent = `${m}:${String(s).padStart(2, '0')} left`;
+      }, 500);
+    }
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderExamPaper(questions) {
+  const wrap = document.getElementById('examQuestions');
+  wrap.innerHTML = questions.map((q, qi) => `
+    <div class="quiz-question">
+      <div class="qq-text">${qi + 1}. ${esc(q.text)} <span class="badge badge-purple" style="margin-left:6px">${q.marks} mark${q.marks !== 1 ? 's' : ''}</span></div>
+      <div class="qq-options">
+        ${q.options.map((opt, oi) => `
+          <label class="qq-option" data-q="${q.id}" data-opt="${oi}">
+            <input type="radio" name="eq-${q.id}" value="${oi}" style="accent-color:var(--cyan)">
+            ${String.fromCharCode(65 + oi)}. ${esc(opt)}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('.qq-option').forEach(label => {
+    label.addEventListener('click', () => {
+      const qId = label.dataset.q;
+      wrap.querySelectorAll(`.qq-option[data-q="${qId}"]`).forEach(l => l.classList.remove('selected'));
+      label.classList.add('selected');
+      label.querySelector('input').checked = true;
+    });
+  });
+}
+
+async function submitExam(id) {
+  clearInterval(examTimer);
+  const answers = {};
+  document.querySelectorAll('.quiz-question').forEach(qEl => {
+    const checked = qEl.querySelector('input:checked');
+    if (checked) answers[checked.name.replace('eq-', '')] = Number(checked.value);
+  });
+  try {
+    const result = await api(`/api/student/exams/${id}/submit`, { method: 'POST', body: { answers } });
+    closeModal();
+    toast(`Exam submitted — score ${result.score}/${result.total} (${result.percentage}%)`);
+    loadExams();
+  } catch (err) { toast(err.message, true); }
+}
+
+function cancelExam() {
+  clearInterval(examTimer);
+  closeModal();
 }
 
 async function loadFees() {
@@ -148,6 +234,14 @@ async function loadFees() {
     <div class="stat-card ${d.pending > 0 ? 'red' : 'green'}"><div class="stat-num">${fmtMoney(d.pending)}</div><div class="stat-label">Pending</div></div>
     <div class="stat-card"><div class="stat-num">${d.fee_paid ? 'PAID' : 'PENDING'}</div><div class="stat-label">Status</div></div>
   `;
+  const btn = document.getElementById('payOnlineBtn');
+  if (btn) {
+    try {
+      const cfg = await api('/api/payment/config');
+      btn.style.display = (cfg.enabled && d.pending > 0) ? 'inline-flex' : 'none';
+      if (cfg.enabled && d.pending > 0) btn.textContent = `PAY ${fmtMoney(d.pending)} ONLINE (UPI/CARD)`;
+    } catch (_) { btn.style.display = 'none'; }
+  }
   document.getElementById('paymentRows').innerHTML = d.payments.length ? d.payments.map(p => `
     <tr>
       <td><span class="badge badge-cyan">${esc(p.receipt_no)}</span></td>
@@ -157,6 +251,53 @@ async function loadFees() {
       <td><strong>${fmtMoney(p.amount)}</strong></td>
     </tr>
   `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded. See the office if you have paid.</div></td></tr>';
+}
+
+function loadRazorpay() {
+  return new Promise((resolve, reject) => {
+    if (window.Razorpay) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load Razorpay checkout'));
+    document.body.appendChild(s);
+  });
+}
+
+async function payOnline(studentId) {
+  if (!studentId) return toast('Sign in first', true);
+  try {
+    const cfg = await api('/api/payment/config');
+    if (!cfg.enabled) return toast('Online payments are not enabled yet', true);
+    const order = await api('/api/payment/order', { method: 'POST', body: { student_id: studentId } });
+    await loadRazorpay();
+    const options = {
+      key: order.key_id,
+      amount: Math.round(order.amount * 100),
+      currency: order.currency || 'INR',
+      name: 'VUMCA hITECH Computing',
+      description: 'Course fee payment',
+      order_id: order.order_id,
+      prefill: { name: currentUser ? currentUser.name : '', email: currentUser ? currentUser.email : '' },
+      theme: { color: '#00e5ff' },
+      handler: async (resp) => {
+        try {
+          const r = await api('/api/payment/verify', { method: 'POST', body: {
+            student_id: studentId,
+            order_id: resp.razorpay_order_id,
+            payment_id: resp.razorpay_payment_id,
+            signature: resp.razorpay_signature,
+          }});
+          toast(`Payment received! Receipt ${r.receipt_no}`);
+          switchTab('fees');
+        } catch (err) { toast(err.message, true); }
+      },
+      modal: { ondismiss: () => toast('Payment window closed') },
+    };
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', resp => toast('Payment failed: ' + ((resp.error && resp.error.description) || ''), true));
+    rzp.open();
+  } catch (err) { toast(err.message, true); }
 }
 
 async function loadCertificates() {

@@ -86,7 +86,10 @@
       <section id="tab-fees" class="tab-panel hidden">
         <div class="stat-grid" id="feeStatGrid"></div>
         <div class="panel">
-          <div class="panel-header"><h2>Payment History</h2></div>
+          <div class="panel-header">
+            <h2>Payment History</h2>
+            <button class="btn btn-purple" id="payOnlineBtn" onclick="payOnline(selectedChildId)" style="display:none">PAY ONLINE (UPI/CARD)</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Receipt</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th></tr></thead>

@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
+const razorpay = require('./razorpay');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -768,26 +769,27 @@ app.delete('/api/admin/payments/:id', requireAdmin, (req, res) => {
 app.get('/api/admin/exams', requireAdmin, (req, res) => {
   res.json(db.prepare(`
     SELECT x.*, c.code AS course_code, c.title AS course_title,
-      (SELECT COUNT(*) FROM exam_results r WHERE r.exam_id = x.id) AS result_count
+      (SELECT COUNT(*) FROM exam_results r WHERE r.exam_id = x.id) AS result_count,
+      (SELECT COUNT(*) FROM exam_questions q WHERE q.exam_id = x.id) AS question_count
     FROM exams x JOIN courses c ON c.id = x.course_id ORDER BY x.exam_date
   `).all());
 });
 
 app.post('/api/admin/exams', requireAdmin, (req, res) => {
-  const { course_id, title, exam_date, max_marks } = req.body || {};
+  const { course_id, title, exam_date, max_marks, duration_minutes } = req.body || {};
   if (!course_id || !title) return res.status(400).json({ error: 'Course and exam title are required' });
   const result = db.prepare(
-    'INSERT INTO exams (course_id, title, exam_date, max_marks) VALUES (?, ?, ?, ?)'
-  ).run(course_id, title, exam_date || null, max_marks || 100);
+    'INSERT INTO exams (course_id, title, exam_date, max_marks, duration_minutes) VALUES (?, ?, ?, ?, ?)'
+  ).run(course_id, title, exam_date || null, max_marks || 100, duration_minutes || 0);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/exams/:id', requireAdmin, (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
   if (!exam) return res.status(404).json({ error: 'Exam not found' });
-  const { title, exam_date, max_marks } = req.body || {};
-  db.prepare('UPDATE exams SET title = ?, exam_date = ?, max_marks = ? WHERE id = ?')
-    .run(title || exam.title, exam_date ?? exam.exam_date, max_marks || exam.max_marks, exam.id);
+  const { title, exam_date, max_marks, duration_minutes } = req.body || {};
+  db.prepare('UPDATE exams SET title = ?, exam_date = ?, max_marks = ?, duration_minutes = ? WHERE id = ?')
+    .run(title || exam.title, exam_date ?? exam.exam_date, max_marks || exam.max_marks, duration_minutes ?? exam.duration_minutes, exam.id);
   res.json({ ok: true });
 });
 
@@ -827,6 +829,57 @@ app.post('/api/admin/exams/:id/results', requireAdmin, (req, res) => {
     db.exec('ROLLBACK');
     throw e;
   }
+  res.json({ ok: true });
+});
+
+// ---------- Admin: online exam question bank ----------
+function syncExamMaxMarks(examId) {
+  db.prepare(
+    'UPDATE exams SET max_marks = COALESCE((SELECT SUM(marks) FROM exam_questions WHERE exam_id = ?), max_marks) WHERE id = ?'
+  ).run(examId, examId);
+}
+
+app.get('/api/admin/exams/:id/questions', requireAdmin, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const questions = db.prepare('SELECT * FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam.id)
+    .map(q => ({ ...q, options: JSON.parse(q.options) }));
+  res.json({ exam, questions });
+});
+
+app.post('/api/admin/exams/:id/questions', requireAdmin, (req, res) => {
+  const { text, options, correct_index, marks } = req.body || {};
+  if (!text || !Array.isArray(options) || options.length < 2) {
+    return res.status(400).json({ error: 'Question text and at least two options are required' });
+  }
+  if (typeof correct_index !== 'number' || correct_index < 0 || correct_index >= options.length) {
+    return res.status(400).json({ error: 'Correct option index is out of range' });
+  }
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const result = db.prepare(
+    'INSERT INTO exam_questions (exam_id, text, options, correct_index, marks) VALUES (?, ?, ?, ?, ?)'
+  ).run(exam.id, text, JSON.stringify(options), correct_index, marks || 1);
+  syncExamMaxMarks(exam.id);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/exams/:id/questions/:qid', requireAdmin, (req, res) => {
+  const q = db.prepare('SELECT * FROM exam_questions WHERE id = ? AND exam_id = ?').get(req.params.qid, req.params.id);
+  if (!q) return res.status(404).json({ error: 'Question not found' });
+  const { text, options, correct_index, marks } = req.body || {};
+  const opts = Array.isArray(options) && options.length >= 2 ? options : JSON.parse(q.options);
+  const idx = typeof correct_index === 'number' ? correct_index : q.correct_index;
+  if (idx < 0 || idx >= opts.length) return res.status(400).json({ error: 'Correct option index is out of range' });
+  db.prepare('UPDATE exam_questions SET text = ?, options = ?, correct_index = ?, marks = ? WHERE id = ?')
+    .run(text || q.text, JSON.stringify(opts), idx, marks || q.marks, q.id);
+  syncExamMaxMarks(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/exams/:id/questions/:qid', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM exam_questions WHERE id = ? AND exam_id = ?').run(req.params.qid, req.params.id);
+  syncExamMaxMarks(Number(req.params.id));
   res.json({ ok: true });
 });
 
@@ -935,13 +988,56 @@ app.get('/api/student/timetable', requireStudent, (req, res) => {
 
 app.get('/api/student/exams', requireStudent, (req, res) => {
   res.json(db.prepare(`
-    SELECT x.*, c.code AS course_code, c.title AS course_title, r.marks
+    SELECT x.*, c.code AS course_code, c.title AS course_title, r.marks,
+      (SELECT COUNT(*) FROM exam_questions q WHERE q.exam_id = x.id) AS question_count
     FROM enrollments e
     JOIN exams x ON x.course_id = e.course_id
     JOIN courses c ON c.id = x.course_id
     LEFT JOIN exam_results r ON r.exam_id = x.id AND r.student_id = e.student_id
     WHERE e.student_id = ? ORDER BY x.exam_date
   `).all(req.session.user.id));
+});
+
+// ---------- Student: online exam taking ----------
+app.get('/api/student/exams/:id/paper', requireStudent, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, exam.course_id);
+  if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in this course' });
+  if (db.prepare('SELECT id FROM exam_results WHERE exam_id = ? AND student_id = ?').get(exam.id, req.session.user.id)) {
+    return res.status(409).json({ error: 'You have already submitted this exam' });
+  }
+  const questions = db.prepare('SELECT id, text, options, marks FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam.id)
+    .map(q => ({ ...q, options: JSON.parse(q.options) }));
+  if (!questions.length) return res.status(400).json({ error: 'No question paper published yet' });
+  res.json({
+    exam: { id: exam.id, title: exam.title, duration_minutes: exam.duration_minutes || 0, max_marks: exam.max_marks },
+    questions,
+  });
+});
+
+app.post('/api/student/exams/:id/submit', requireStudent, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, exam.course_id);
+  if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in this course' });
+  if (db.prepare('SELECT id FROM exam_results WHERE exam_id = ? AND student_id = ?').get(exam.id, req.session.user.id)) {
+    return res.status(409).json({ error: 'You have already submitted this exam' });
+  }
+  const questions = db.prepare('SELECT * FROM exam_questions WHERE exam_id = ?').all(exam.id);
+  if (!questions.length) return res.status(400).json({ error: 'No question paper published yet' });
+  const answers = (req.body || {}).answers || {};
+  let score = 0;
+  let total = 0;
+  for (const q of questions) {
+    const marks = q.marks || 1;
+    total += marks;
+    if (Number(answers[q.id]) === q.correct_index) score += marks;
+  }
+  db.prepare('INSERT INTO exam_results (exam_id, student_id, marks) VALUES (?, ?, ?)').run(exam.id, req.session.user.id, score);
+  res.status(201).json({ score, total, percentage: total ? Math.round((score / total) * 100) : 0 });
 });
 
 app.get('/api/student/fees', requireStudent, (req, res) => {
@@ -1105,6 +1201,86 @@ app.get('/api/parent/children/:id/dashboard', requireParent, (req, res) => {
     payments,
     examResults,
   });
+});
+
+// =====================================================================
+// ================== ONLINE FEE PAYMENTS (RAZORPAY) ===================
+// =====================================================================
+
+const requirePayer = (req, res, next) => {
+  if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.session.user.role !== 'student' && req.session.user.role !== 'parent') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  next();
+};
+
+function payerCanAccess(req, studentId) {
+  const u = req.session.user;
+  if (u.role === 'student') return u.id === studentId;
+  return Boolean(
+    db.prepare('SELECT id FROM parent_students WHERE parent_id = ? AND student_id = ?').get(u.id, studentId)
+  );
+}
+
+app.get('/api/payment/config', requireAuth, (req, res) => {
+  res.json({ enabled: razorpay.isConfigured(), key_id: razorpay.isConfigured() ? razorpay.getKeyId() : null });
+});
+
+app.post('/api/payment/order', requirePayer, async (req, res) => {
+  try {
+    if (!razorpay.isConfigured()) return res.status(400).json({ error: 'Online payments are not enabled' });
+    const studentId = Number((req.body || {}).student_id);
+    const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(studentId);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (!payerCanAccess(req, studentId)) return res.status(403).json({ error: 'Not linked to this student' });
+    const paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE student_id = ?').get(studentId).t;
+    const pending = Math.max(0, (student.fee_amount || 0) - paid);
+    if (pending <= 0) return res.status(400).json({ error: 'No pending dues to pay' });
+    const order = await razorpay.createOrder({ amountInRupees: pending, receipt: 'rcpt_' + Date.now() });
+    res.json({ order_id: order.id, amount: pending, currency: 'INR', key_id: razorpay.getKeyId() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/payment/verify', requirePayer, async (req, res) => {
+  try {
+    if (!razorpay.isConfigured()) return res.status(400).json({ error: 'Online payments are not enabled' });
+    const { student_id, order_id, payment_id, signature } = req.body || {};
+    const studentId = Number(student_id);
+    if (!order_id || !payment_id || !signature) return res.status(400).json({ error: 'Missing payment details' });
+    const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(studentId);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (!payerCanAccess(req, studentId)) return res.status(403).json({ error: 'Not linked to this student' });
+    if (!razorpay.verifySignature({ orderId: order_id, paymentId: payment_id, signature })) {
+      return res.status(400).json({ error: 'Payment signature verification failed' });
+    }
+    const order = await razorpay.getOrder(order_id);
+    const amount = (order.amount || 0) / 100;
+    if (amount <= 0) return res.status(400).json({ error: 'Invalid order amount' });
+
+    const receiptNo = 'RCP-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-6);
+    db.prepare(
+      "INSERT INTO payments (student_id, amount, method, receipt_no, note, paid_at) VALUES (?, ?, 'razorpay', ?, 'Online payment (Razorpay)', datetime('now'))"
+    ).run(studentId, amount, receiptNo);
+    const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE student_id = ?').get(studentId).t;
+    const cleared = totalPaid >= (student.fee_amount || 0);
+    if (cleared) db.prepare('UPDATE users SET fee_paid = 1 WHERE id = ?').run(studentId);
+
+    let notifStatus = 'failed';
+    try {
+      const msg = `Hi ${student.name.split(' ')[0]}, we received Rs. ${amount} online (Receipt ${receiptNo}). Thank you! - VUMCA hITECH Computing`;
+      const r = await notify.sendReminder({ to: student.mobile, channel: 'whatsapp', message: msg });
+      notifStatus = r.status;
+      db.prepare('INSERT INTO notifications (student_id, channel, purpose, message, status, sent_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))')
+        .run(studentId, 'whatsapp', 'fee', msg, notifStatus);
+    } catch (_) {}
+
+    res.json({ ok: true, amount, receipt_no: receiptNo, cleared });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(PORT, () => {

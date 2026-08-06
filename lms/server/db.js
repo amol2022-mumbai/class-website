@@ -90,7 +90,8 @@ db.exec(`
     course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     exam_date TEXT,
-    max_marks INTEGER DEFAULT 100
+    max_marks INTEGER DEFAULT 100,
+    duration_minutes INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS exam_results (
@@ -99,6 +100,15 @@ db.exec(`
     student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     marks REAL NOT NULL DEFAULT 0,
     UNIQUE(exam_id, student_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS exam_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    options TEXT NOT NULL,
+    correct_index INTEGER NOT NULL,
+    marks REAL DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS certificates (
@@ -229,6 +239,11 @@ function migrate() {
   const enrollCols = db.prepare('PRAGMA table_info(enrollments)').all().map((c) => c.name);
   if (!enrollCols.includes('batch_id')) {
     db.exec('ALTER TABLE enrollments ADD COLUMN batch_id INTEGER');
+  }
+
+  const examCols = db.prepare('PRAGMA table_info(exams)').all().map((c) => c.name);
+  if (!examCols.includes('duration_minutes')) {
+    db.exec('ALTER TABLE exams ADD COLUMN duration_minutes INTEGER DEFAULT 0');
   }
 }
 

@@ -134,6 +134,14 @@ async function loadFees() {
     <div class="stat-card ${fee.pending > 0 ? 'red' : 'green'}"><div class="stat-num">${fmtMoney(fee.pending)}</div><div class="stat-label">Pending</div></div>
     <div class="stat-card"><div class="stat-num">${fee.fee_paid ? 'PAID' : 'PENDING'}</div><div class="stat-label">Status</div></div>
   `;
+  const btn = document.getElementById('payOnlineBtn');
+  if (btn) {
+    try {
+      const cfg = await api('/api/payment/config');
+      btn.style.display = (cfg.enabled && fee.pending > 0) ? 'inline-flex' : 'none';
+      if (cfg.enabled && fee.pending > 0) btn.textContent = `PAY ${fmtMoney(fee.pending)} ONLINE (UPI/CARD)`;
+    } catch (_) { btn.style.display = 'none'; }
+  }
   document.getElementById('paymentRows').innerHTML = d.payments.length ? d.payments.map(p => `
     <tr>
       <td><span class="badge badge-cyan">${esc(p.receipt_no)}</span></td>
@@ -143,6 +151,54 @@ async function loadFees() {
       <td><strong>${fmtMoney(p.amount)}</strong></td>
     </tr>
   `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded.</div></td></tr>';
+}
+
+function loadRazorpay() {
+  return new Promise((resolve, reject) => {
+    if (window.Razorpay) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load Razorpay checkout'));
+    document.body.appendChild(s);
+  });
+}
+
+async function payOnline(studentId) {
+  if (!studentId) return toast('Select a child first', true);
+  try {
+    const cfg = await api('/api/payment/config');
+    if (!cfg.enabled) return toast('Online payments are not enabled yet', true);
+    const order = await api('/api/payment/order', { method: 'POST', body: { student_id: studentId } });
+    await loadRazorpay();
+    const options = {
+      key: order.key_id,
+      amount: Math.round(order.amount * 100),
+      currency: order.currency || 'INR',
+      name: 'VUMCA hITECH Computing',
+      description: 'Course fee payment',
+      order_id: order.order_id,
+      prefill: { name: currentUser ? currentUser.name : '', email: currentUser ? currentUser.email : '' },
+      theme: { color: '#00e5ff' },
+      handler: async (resp) => {
+        try {
+          const r = await api('/api/payment/verify', { method: 'POST', body: {
+            student_id: studentId,
+            order_id: resp.razorpay_order_id,
+            payment_id: resp.razorpay_payment_id,
+            signature: resp.razorpay_signature,
+          }});
+          toast(`Payment received! Receipt ${r.receipt_no}`);
+          dashCache = null;
+          switchTab('fees');
+        } catch (err) { toast(err.message, true); }
+      },
+      modal: { ondismiss: () => toast('Payment window closed') },
+    };
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', resp => toast('Payment failed: ' + ((resp.error && resp.error.description) || ''), true));
+    rzp.open();
+  } catch (err) { toast(err.message, true); }
 }
 
 async function loadResults() {
