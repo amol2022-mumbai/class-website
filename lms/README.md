@@ -86,6 +86,17 @@ SMS_TWILIO_AUTH_TOKEN=your_auth_token
 SMS_TWILIO_FROM=+15551234567
 ```
 
+**WhatsApp delivery notes**
+
+- Student mobiles may be stored like `+91 98765 43210`; the app automatically
+  normalises them to strict E.164 (`+919876543210`) before sending, so a valid
+  Indian mobile with or without spaces/country code works.
+- WhatsApp messages go to `whatsapp:+91…`. The recipient must have WhatsApp on
+  that number, and your `SMS_TWILIO_FROM` sender must be **WhatsApp-enabled** in
+  the Twilio console (Messaging → Senders) or the API returns an error and the
+  reminder shows as `failed` in the log.
+- Ten-digit Indian numbers are assumed to be `+91` prefixed automatically.
+
 ## Deploying on Hostinger (shared Node.js hosting)
 
 1. Upload the project files (the `lms/` folder) to your hosting directory.

@@ -468,41 +468,50 @@ td .muted { color: var(--text-muted); font-size: 13px; }
   .form-grid { grid-template-columns: 1fr; }
 }
 
-/* Receipt & certificate */
-.receipt-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 20px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+/* Receipt & certificate — A4 printable sheet */
+.print-sheet {
+  background: #fff;
+  color: #111;
+  padding: 22px;
   border-radius: 8px;
-  padding: 18px;
 }
-.receipt-grid .span-2 { grid-column: 1 / -1; }
-
-.certificate {
-  border: 2px solid var(--cyan);
-  outline: 2px solid var(--purple);
-  outline-offset: 4px;
-  border-radius: 10px;
-  padding: 34px 28px;
-  text-align: center;
-  background: linear-gradient(160deg, rgba(0, 229, 255, 0.05), rgba(168, 85, 247, 0.05));
-}
-.cert-org { font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 1px; }
-.cert-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--cyan); margin: 14px 0 6px; }
-.cert-sub { color: var(--text-muted); font-size: 13px; margin: 4px 0; }
-.cert-name { font-family: var(--font-display); font-size: 30px; font-weight: 700; margin: 14px 0; color: var(--purple); text-transform: uppercase; letter-spacing: 2px; }
-.cert-course { font-size: 18px; font-weight: 600; margin: 8px 0; color: var(--green); }
-.cert-footer { display: flex; justify-content: space-between; margin-top: 30px; font-size: 12px; }
+.sheet-head { text-align: center; padding-bottom: 10px; }
+.sheet-brand { font-family: var(--font-display); font-size: 24px; font-weight: 800; letter-spacing: 1px; color: #0b1030; }
+.sheet-accent { color: #0e7490; }
+.sheet-org { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: #555; margin-top: 2px; }
+.sheet-addr { font-size: 11px; color: #666; margin-top: 2px; }
+.sheet-rule { border-bottom: 3px double #0b1030; margin: 12px 0; }
+.sheet-doctitle { font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: 3px; color: #0b1030; margin-top: 4px; }
+.sheet-docno { font-size: 11px; color: #444; margin-top: 4px; }
+.sheet-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.sheet-table th, .sheet-table td { border: 1px solid #bbb; padding: 8px 10px; font-size: 12px; text-align: left; }
+.sheet-table th { background: #f0f0f0; color: #222; width: 34%; font-weight: 600; }
+.sheet-table td { color: #111; }
+.sheet-amount { font-size: 16px; font-weight: 700; color: #0e7490; }
+.sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 26px; }
+.sheet-sign { font-size: 12px; color: #333; border-top: 1px solid #555; padding-top: 6px; min-width: 160px; }
+.sheet-note { font-size: 10px; color: #777; text-align: right; line-height: 1.5; }
+.sheet-muted { color: #666; font-weight: 400; }
+.sheet-certframe { border: 3px double #0b1030; border-radius: 6px; padding: 16px; margin-top: 8px; }
+.sheet-certbody { text-align: center; padding: 28px 10px; }
+.sheet-certsub { color: #444; font-size: 13px; margin: 6px 0; }
+.sheet-certname { font-family: var(--font-display); font-size: 28px; font-weight: 800; margin: 16px 0; color: #0b1030; text-transform: uppercase; letter-spacing: 3px; border-bottom: 2px solid #0b1030; display: inline-block; padding: 0 24px 6px; }
+.sheet-certcourse { font-size: 16px; font-weight: 700; color: #0e7490; margin: 8px 0; }
 
 .notify-form .form-grid select[multiple] { min-height: 130px; }
 
+@page { size: A4; margin: 10mm; }
+
 @media print {
-  .scanlines, .grid-bg, .sidebar, .topbar, .modal-close { display: none !important; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .scanlines, .grid-bg, .sidebar, .side-nav, .side-brand, .side-footer,
+  .topbar, .modal-close, .modal-header, .modal-actions, .toast { display: none !important; }
   .dash { display: block; }
-  .main { padding: 0; }
-  .modal-overlay { position: static; background: none; padding: 0; }
-  .modal { max-width: 100%; }
-  body { background: #fff; }
+  .main { padding: 0; margin: 0; }
+  .modal-overlay { position: static; padding: 0; background: #fff !important; display: block; }
+  .modal { max-width: none; width: 100%; max-height: none; overflow: visible; box-shadow: none; border: none; border-radius: 0; }
+  .modal-body { padding: 0; }
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-sheet { position: absolute; left: 0; top: 0; width: 100%; border: none; box-shadow: none; border-radius: 0; padding: 0 4mm; }
 }

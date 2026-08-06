@@ -516,7 +516,7 @@ function seedModules() {
     const insertNotification = db.prepare(
       'INSERT INTO notifications (student_id, channel, purpose, message, status, sent_at) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    insertNotification.run(studentIds[3], 'whatsapp', 'fee', 'Reminder: your fee of $1300 is pending. Please pay before the due date.', 'sent', formatFut(-1) + ' 09:00:00');
+    insertNotification.run(studentIds[3], 'whatsapp', 'fee', 'Reminder: your fee of Rs. 1200 is pending. Please pay before the due date.', 'sent', formatFut(-1) + ' 09:00:00');
     insertNotification.run(studentIds[4], 'sms', 'class', 'Reminder: CS105 class tomorrow at 10:00. Don\'t forget!', 'sent', formatFut(-1) + ' 09:05:00');
   }
 }

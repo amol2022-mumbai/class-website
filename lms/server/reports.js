@@ -177,7 +177,7 @@ function examsReport() {
 }
 
 function formatMoney(n) {
-  return '$' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
 const builders = {

@@ -1414,23 +1414,55 @@ function openPaymentModal() {
 async function viewReceipt(id) {
   const p = await api(`/api/admin/payments/${id}/receipt`);
   showModal('Payment Receipt — ' + p.receipt_no, `
-    <div style="text-align:center;margin-bottom:18px">
-      <div style="font-family:var(--font-display);font-size:20px;font-weight:700">VUMCA <span style="color:var(--cyan)">hITECH</span> Computing</div>
-      <div class="muted">OFFICIAL PAYMENT RECEIPT</div>
-    </div>
-    <div class="receipt-grid">
-      <div><span class="muted">Receipt No</span><div><strong>${esc(p.receipt_no)}</strong></div></div>
-      <div><span class="muted">Date</span><div><strong>${esc(p.paid_at || '—')}</strong></div></div>
-      <div><span class="muted">Student</span><div><strong>${esc(p.student_name)}</strong> (${esc(p.username)})</div></div>
-      <div><span class="muted">Method</span><div><strong>${esc(p.method || '—')}</strong></div></div>
-      <div class="span-2"><span class="muted">Note</span><div>${esc(p.note || '—')}</div></div>
-      <div class="span-2" style="text-align:right;font-size:22px;font-weight:700;color:var(--green)">${fmtMoney(p.amount)}</div>
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> Computing</div>
+        <div class="sheet-org">School of Computer Science &amp; Technology</div>
+        <div class="sheet-addr">Plot 14, Sector 7, New Mumbai &ndash; 400 710</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">OFFICIAL PAYMENT RECEIPT</div>
+        <div class="sheet-docno">Receipt No. ${esc(p.receipt_no)} &nbsp;&bull;&nbsp; Date: ${esc(p.paid_at || '—')}</div>
+      </div>
+      <table class="sheet-table">
+        <tr><th>Student Name</th><td>${esc(p.student_name)} <span class="sheet-muted">(${esc(p.username)})</span></td></tr>
+        <tr><th>Payment Method</th><td>${esc(p.method || '—')}</td></tr>
+        <tr><th>Amount Received</th><td class="sheet-amount">${fmtMoney(p.amount)}</td></tr>
+        <tr><th>Amount In Words</th><td>${esc(toIndianWords(p.amount))}</td></tr>
+        <tr><th>Note</th><td>${esc(p.note || '—')}</td></tr>
+        <tr><th>Status</th><td><strong>PAID</strong></td></tr>
+      </table>
+      <div class="sheet-foot">
+        <div class="sheet-sign">Authorized Signatory</div>
+        <div class="sheet-note">This is a computer generated receipt.<br>Thank you for your payment.</div>
+      </div>
     </div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
       <button class="btn btn-purple" onclick="window.print()">PRINT</button>
     </div>
   `);
+}
+
+function toIndianWords(n) {
+  n = Math.round(Number(n) || 0);
+  if (n === 0) return 'Zero Rupees Only';
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = x => x < 20 ? ones[x] : tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+  const three = x => {
+    const h = Math.floor(x / 100), r = x % 100;
+    return (h ? ones[h] + ' Hundred' + (r ? ' ' : '') : '') + (r ? two(r) : '');
+  };
+  let crore = Math.floor(n / 10000000); n %= 10000000;
+  let lakh = Math.floor(n / 100000); n %= 100000;
+  let thousand = Math.floor(n / 1000); n %= 1000;
+  const parts = [];
+  if (crore) parts.push(two(crore) + ' Crore');
+  if (lakh) parts.push(two(lakh) + ' Lakh');
+  if (thousand) parts.push(two(thousand) + ' Thousand');
+  if (n) parts.push(three(n));
+  return parts.join(' ') + ' Rupees Only';
 }
 
 async function deletePayment(id, receiptNo) {
@@ -1449,6 +1481,7 @@ async function loadCertificates() {
   ]);
   window._students = students;
   window._courses = courses;
+  window._certificates = certificates;
   document.getElementById('certificateRows').innerHTML = certificates.length ? certificates.map(c => `
     <tr>
       <td><span class="badge badge-cyan">${esc(c.cert_no)}</span></td>
@@ -1457,7 +1490,7 @@ async function loadCertificates() {
       <td><span class="badge badge-purple">${esc(c.type)}</span></td>
       <td class="muted">${esc(c.issued_date || '')}</td>
       <td class="table-actions">
-        <button class="btn btn-ghost btn-sm" onclick="viewCertificate(${c.id}, ${c.student_id}, ${c.course_id})">VIEW</button>
+        <button class="btn btn-ghost btn-sm" onclick="viewCertificate(${c.id})">VIEW</button>
         <button class="btn btn-danger btn-sm" onclick="deleteCertificate(${c.id}, '${esc(c.cert_no)}')">DEL</button>
       </td>
     </tr>
@@ -1511,22 +1544,37 @@ function openCertificateModal() {
   });
 }
 
-async function viewCertificate(id, studentId, courseId) {
-  const [students, courses] = await Promise.all([api('/api/admin/students'), api('/api/admin/courses')]);
-  const student = students.find(s => s.id === studentId);
-  const course = courses.find(c => c.id === courseId);
+async function viewCertificate(id) {
+  const cert = (window._certificates || []).find(x => x.id === id);
+  if (!cert) return toast('Certificate not found', true);
+  const student = (window._students || []).find(s => s.id === cert.student_id);
+  const course = (window._courses || []).find(c => c.id === cert.course_id);
+  const typeLabel = cert.type === 'completion' ? 'CERTIFICATE OF COMPLETION'
+    : cert.type === 'achievement' ? 'CERTIFICATE OF ACHIEVEMENT'
+    : 'CERTIFICATE OF PARTICIPATION';
   showModal('Certificate', `
-    <div class="certificate">
-      <div class="cert-org">VUMCA <span style="color:var(--cyan)">hITECH</span> Computing</div>
-      <div class="cert-title">CERTIFICATE OF COMPLETION</div>
-      <div class="cert-sub">This is to certify that</div>
-      <div class="cert-name">${esc(student ? student.name : 'Student')}</div>
-      <div class="cert-sub">has successfully completed the course</div>
-      <div class="cert-course">${esc(course ? course.title : '')}</div>
-      <div class="cert-sub" style="margin-top:16px">Awarded for demonstrating proficiency in the subject matter.</div>
-      <div class="cert-footer">
-        <div class="muted">Authorized Signature<br><em>Principal</em></div>
-        <div class="muted" style="text-align:right">VUMCA hITECH Computing<br><em>${esc(course ? course.code : '')}</em></div>
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> Computing</div>
+        <div class="sheet-org">School of Computer Science &amp; Technology</div>
+        <div class="sheet-addr">Plot 14, Sector 7, New Mumbai &ndash; 400 710</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">${typeLabel}</div>
+        <div class="sheet-docno">Certificate No. ${esc(cert.cert_no)} &nbsp;&bull;&nbsp; Date: ${esc(cert.issued_date || '—')}</div>
+      </div>
+      <div class="sheet-certframe">
+        <div class="sheet-certbody">
+          <div class="sheet-certsub">This is to proudly certify that</div>
+          <div class="sheet-certname">${esc(student ? student.name : 'Student')}</div>
+          <div class="sheet-certsub">has successfully completed the course</div>
+          <div class="sheet-certcourse">${esc(course ? course.title : '')}</div>
+          <div class="sheet-certsub">(${esc(course ? course.code : '')})</div>
+          <div class="sheet-certsub">Awarded for demonstrating proficiency in the subject matter.</div>
+        </div>
+      </div>
+      <div class="sheet-foot" style="margin-top:22px">
+        <div class="sheet-sign">Authorized Signatory<br><span class="sheet-muted">Principal</span></div>
+        <div class="sheet-sign" style="text-align:right">VUMCA hITECH Computing<br><span class="sheet-muted">${esc(course ? course.code : '')}</span></div>
       </div>
     </div>
     <div class="modal-actions" style="margin-top:16px">
@@ -1559,6 +1607,10 @@ async function loadNotifications() {
     badge.textContent = configured ? 'SMS SERVICE READY' : 'SMS NOT CONFIGURED — SIMULATION MODE';
     badge.classList.toggle('badge-purple', configured);
     badge.classList.toggle('badge-yellow', !configured);
+    const hint = document.getElementById('notifyHint');
+    hint.innerHTML = configured
+      ? '<strong>WhatsApp:</strong> messages go to <code>whatsapp:+91…</code>. Recipients must have WhatsApp on that number, and your Twilio sender must be WhatsApp-enabled (Twilio Console → Messaging → Senders). If a message shows <code>failed</code>, check the log detail.'
+      : 'Add <code>SMS_TWILIO_ACCOUNT_SID</code>, <code>SMS_TWILIO_AUTH_TOKEN</code> and <code>SMS_TWILIO_FROM</code> to your <code>.env</code> to send real SMS/WhatsApp. Until then, reminders are recorded in simulation mode.';
   } catch (_) {}
   document.getElementById('notificationRows').innerHTML = notifications.length ? notifications.map(n => `
     <tr>
@@ -1624,7 +1676,7 @@ function exportCsv() {
 }
 
 function fmtMoney(n) {
-  return '$' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
 // ---------- Modal helpers ----------
