@@ -44,9 +44,19 @@ Additional demo accounts: students STU002–STU007 (password `student123` /
 - **Login** — separate admin / student / faculty / parent portals with session auth
 - **Admin console** — dashboard stats, manage students (mobile, fee amount & paid
   status), courses, enrollments, assignments (submission grading), quizzes (builder +
-  auto-grading), daily attendance, batches & timetables, faculty members, parent
-  accounts, exams & result entry (plus an online question-paper builder), payments &
-  receipts, certificates, SMS/WhatsApp reminders, and a report builder (CSV export)
+  auto-grading), daily attendance, batches & timetables, faculty members, staff
+  management (roles, salaries, payroll report), parent accounts, exams & result entry
+  (plus an online question-paper builder), payments & receipts with **GST tax
+  invoices**, expense tracking, SMS/WhatsApp reminders, and a report builder (CSV
+  export)
+- **Multi-branch support** — create multiple branches/centers with their own GSTIN
+  and GST rate; a branch switcher in the admin top bar filters students, courses,
+  batches, faculty, staff, exams, payments, expenses and reports to the active branch
+- **GST tax invoices** — any recorded payment can be printed as an A4 tax invoice
+  with the branch GSTIN, HSN, taxable value and CGST/SGST split at the branch's GST
+  rate
+- **Income & expense reports** — monthly income (fees collected) vs expenses with net
+  income, plus dedicated staff and expense reports, all scoped to the active branch
 - **AI quiz generation** — generate multiple-choice quiz questions from a topic
   using an OpenAI-compatible LLM API
 - **Online exams** — admins build a timed MCQ question paper per exam; students take
@@ -145,6 +155,7 @@ lms/
     ai.js      # optional AI quiz generation (env-configured)
     notify.js  # optional SMS/WhatsApp reminders (env-configured)
     reports.js # report builders for the admin Reports tab
+    razorpay.js # optional Razorpay order/signature verification (env-configured)
   public/
     index.html        # landing page
     login.html        # login portal

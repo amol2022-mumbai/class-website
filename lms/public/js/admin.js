@@ -4,16 +4,19 @@ let editingQuiz = null;
 
 const tabTitles = {
   dashboard: ['// ADMIN / OVERVIEW', 'Command Center'],
+  branches: ['// ADMIN / BRANCHES', 'Branches & Centers'],
   students: ['// ADMIN / STUDENTS', 'Student Records'],
   courses: ['// ADMIN / COURSES', 'Course Catalog'],
   enrollments: ['// ADMIN / ENROLLMENTS', 'Enrollment Matrix'],
   batches: ['// ADMIN / BATCHES', 'Batches & Timetable'],
   faculty: ['// ADMIN / FACULTY', 'Faculty Members'],
+  staff: ['// ADMIN / STAFF', 'Staff Management'],
   parents: ['// ADMIN / PARENTS', 'Parent Accounts'],
   assignments: ['// ADMIN / ASSIGNMENTS', 'Assignments'],
   quizzes: ['// ADMIN / QUIZZES', 'Quizzes'],
   exams: ['// ADMIN / EXAMS', 'Exams & Results'],
   payments: ['// ADMIN / PAYMENTS', 'Payments & Receipts'],
+  expenses: ['// ADMIN / EXPENSES', 'Expense Tracking'],
   certificates: ['// ADMIN / CERTIFICATES', 'Certificates'],
   notifications: ['// ADMIN / REMINDERS', 'Reminders & Notifications'],
   attendance: ['// ADMIN / ATTENDANCE', 'Attendance Tracker'],
@@ -40,15 +43,42 @@ const tabTitles = {
     else if (tab === 'enrollments') openEnrollmentModal();
     else if (tab === 'batches') openBatchModal();
     else if (tab === 'faculty') openFacultyModal();
+    else if (tab === 'staff') openStaffModal();
     else if (tab === 'parents') openParentModal();
     else if (tab === 'exams') openExamModal();
     else if (tab === 'payments') openPaymentModal();
+    else if (tab === 'expenses') openExpenseModal();
     else if (tab === 'certificates') openCertificateModal();
+    else if (tab === 'branches') openBranchModal();
   });
 
+  await loadBranchSelect();
   switchTab('dashboard');
   document.getElementById('attDate').value = todayStr();
 })();
+
+async function loadBranchSelect() {
+  try {
+    const data = await api('/api/admin/branches');
+    window._branches = data.branches || [];
+    const sel = document.getElementById('branchSelect');
+    sel.innerHTML = (window._branches || []).map(b =>
+      `<option value="${b.id}">${esc(b.code)} — ${esc(b.name)}</option>`
+    ).join('');
+    sel.value = String(data.active || '');
+  } catch (_) {}
+}
+
+async function switchBranch() {
+  const branch_id = Number(document.getElementById('branchSelect').value);
+  if (!branch_id) return;
+  try {
+    await api('/api/admin/branches/switch', { method: 'POST', body: { branch_id } });
+    toast('Branch switched');
+    const active = document.querySelector('.nav-item.active');
+    switchTab(active ? active.dataset.tab : 'dashboard');
+  } catch (err) { toast(err.message, true); }
+}
 
 function switchTab(tab) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
@@ -62,20 +92,114 @@ function switchTab(tab) {
     tab === 'dashboard' || tab === 'attendance' ? 'none' : 'inline-flex';
 
   if (tab === 'dashboard') loadStats();
+  else if (tab === 'branches') loadBranches();
   else if (tab === 'students') loadStudents();
   else if (tab === 'courses') loadCourses();
   else if (tab === 'enrollments') loadEnrollments();
   else if (tab === 'batches') loadBatches();
   else if (tab === 'faculty') loadFaculty();
+  else if (tab === 'staff') loadStaff();
   else if (tab === 'parents') loadParents();
   else if (tab === 'assignments') loadAssignments();
   else if (tab === 'quizzes') loadQuizzes();
   else if (tab === 'exams') loadExams();
   else if (tab === 'payments') loadPayments();
+  else if (tab === 'expenses') loadExpenses();
   else if (tab === 'certificates') loadCertificates();
   else if (tab === 'notifications') loadNotifications();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'reports') loadReports();
+}
+
+// ---------- Branches ----------
+async function loadBranches() {
+  const data = await api('/api/admin/branches');
+  window._branches = data.branches || [];
+  document.getElementById('branchRows').innerHTML = (data.branches || []).length ? data.branches.map(b => `
+    <tr>
+      <td><span class="badge badge-cyan">${esc(b.code)}</span> ${b.id === data.active ? '<span class="badge badge-green">ACTIVE</span>' : ''}</td>
+      <td><strong>${esc(b.name)}</strong><br><span class="muted">${esc(b.address || '')}</span></td>
+      <td class="muted">${esc(b.gstin || '—')}</td>
+      <td>${esc(b.gst_rate)}%</td>
+      <td>${b.students}</td>
+      <td>${b.courses}</td>
+      <td>${b.staff}</td>
+      <td>${b.expenses}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openBranchModal(${b.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBranch(${b.id}, '${esc(b.name)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="9"><div class="empty-state"><span class="es-icon">◈</span>No branches yet.</div></td></tr>';
+}
+
+function openBranchModal(id) {
+  const b = (window._branches || []).find(x => x.id === id) || {};
+  showModal(b.id ? 'Edit Branch — ' + b.code : 'Add Branch', `
+    <form id="branchForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Branch Name</label>
+          <input type="text" name="name" required value="${esc(b.name || '')}" placeholder="e.g. Pune Campus">
+        </div>
+        <div class="field">
+          <label>Branch Code</label>
+          <input type="text" name="code" required value="${esc(b.code || '')}" placeholder="e.g. PUN" style="text-transform:uppercase">
+        </div>
+        <div class="field span-2">
+          <label>Address</label>
+          <input type="text" name="address" value="${esc(b.address || '')}" placeholder="Street, City - PIN">
+        </div>
+        <div class="field">
+          <label>Phone</label>
+          <input type="text" name="phone" value="${esc(b.phone || '')}">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="${esc(b.email || '')}">
+        </div>
+        <div class="field">
+          <label>GSTIN</label>
+          <input type="text" name="gstin" value="${esc(b.gstin || '')}" placeholder="e.g. 27ABCDE1234F1Z5">
+        </div>
+        <div class="field">
+          <label>GST Rate (%)</label>
+          <input type="number" name="gst_rate" min="0" max="28" step="0.5" value="${b.gst_rate != null ? b.gst_rate : 18}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${b.id ? 'SAVE CHANGES' : 'ADD BRANCH'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('branchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      name: f.get('name'), code: f.get('code'), address: f.get('address'),
+      phone: f.get('phone'), email: f.get('email'), gstin: f.get('gstin'),
+      gst_rate: Number(f.get('gst_rate')),
+    };
+    try {
+      if (b.id) await api('/api/admin/branches/' + b.id, { method: 'PUT', body });
+      else await api('/api/admin/branches', { method: 'POST', body });
+      toast(b.id ? 'Branch updated' : 'Branch added');
+      closeModal();
+      loadBranches();
+      loadBranchSelect();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteBranch(id, name) {
+  if (!confirm(`Delete branch "${name}"? Only empty branches can be deleted.`)) return;
+  try {
+    await api('/api/admin/branches/' + id, { method: 'DELETE' });
+    toast('Branch deleted');
+    loadBranches();
+    loadBranchSelect();
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------- Dashboard ----------
@@ -161,7 +285,7 @@ function openStudentModal(student) {
           <input type="tel" name="mobile" value="${esc(student ? student.mobile || '' : '')}" placeholder="e.g. +91 98765 43210">
         </div>
         <div class="field">
-          <label>Fee Amount ($)</label>
+          <label>Fee Amount (Rs.)</label>
           <input type="number" name="fee_amount" min="0" step="0.01" value="${student ? student.fee_amount || 0 : 0}">
         </div>
         <div class="field">
@@ -1130,6 +1254,106 @@ async function deleteFaculty(id, name) {
   } catch (err) { toast(err.message, true); }
 }
 
+// ---------- Staff ----------
+async function loadStaff() {
+  const staff = await api('/api/admin/staff');
+  window._staff = staff;
+  document.getElementById('staffRows').innerHTML = staff.length ? staff.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td><span class="badge badge-purple">${esc(s.role)}</span></td>
+      <td class="muted">${esc(s.phone || '—')}</td>
+      <td class="muted">${esc(s.email || '—')}</td>
+      <td><strong>${fmtMoney(s.salary)}</strong></td>
+      <td class="muted">${esc(s.salary_type)}</td>
+      <td class="muted">${esc(s.join_date || '—')}</td>
+      <td><span class="badge ${s.status === 'active' ? 'badge-green' : 'badge-red'}">${esc(s.status)}</span></td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openStaffModal(${s.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteStaff(${s.id}, '${esc(s.name)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="9"><div class="empty-state"><span class="es-icon">☍</span>No staff records yet.</div></td></tr>';
+}
+
+function openStaffModal(id) {
+  const s = (window._staff || []).find(x => x.id === id) || {};
+  showModal(s.id ? 'Edit Staff — ' + s.name : 'Add Staff Member', `
+    <form id="staffForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" name="name" required value="${esc(s.name || '')}">
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <input type="text" name="role" value="${esc(s.role || 'Staff')}" placeholder="e.g. Accountant, Office Manager">
+        </div>
+        <div class="field">
+          <label>Phone</label>
+          <input type="text" name="phone" value="${esc(s.phone || '')}">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="${esc(s.email || '')}">
+        </div>
+        <div class="field">
+          <label>Salary (Rs.)</label>
+          <input type="number" name="salary" min="0" step="0.01" value="${s.salary || ''}">
+        </div>
+        <div class="field">
+          <label>Salary Type</label>
+          <select name="salary_type">
+            <option value="monthly" ${s.salary_type === 'monthly' ? 'selected' : ''}>Monthly</option>
+            <option value="daily" ${s.salary_type === 'daily' ? 'selected' : ''}>Daily</option>
+            <option value="one-time" ${s.salary_type === 'one-time' ? 'selected' : ''}>One-time</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Join Date</label>
+          <input type="date" name="join_date" value="${esc(s.join_date || '')}">
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select name="status">
+            <option value="active" ${(s.status || 'active') === 'active' ? 'selected' : ''}>Active</option>
+            <option value="inactive" ${s.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${s.id ? 'SAVE CHANGES' : 'ADD STAFF'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('staffForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      name: f.get('name'), role: f.get('role'), phone: f.get('phone'), email: f.get('email'),
+      salary: Number(f.get('salary') || 0), salary_type: f.get('salary_type'),
+      join_date: f.get('join_date'), status: f.get('status'),
+    };
+    try {
+      if (s.id) await api('/api/admin/staff/' + s.id, { method: 'PUT', body });
+      else await api('/api/admin/staff', { method: 'POST', body });
+      toast(s.id ? 'Staff updated' : 'Staff added');
+      closeModal();
+      loadStaff();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteStaff(id, name) {
+  if (!confirm(`Delete staff record for "${name}"?`)) return;
+  try {
+    await api('/api/admin/staff/' + id, { method: 'DELETE' });
+    toast('Staff record deleted');
+    loadStaff();
+  } catch (err) { toast(err.message, true); }
+}
+
 // ---------- Parents ----------
 async function loadParents() {
   const [parents, students] = await Promise.all([api('/api/admin/parents'), api('/api/admin/students')]);
@@ -1450,6 +1674,7 @@ async function loadPayments() {
       <td><strong>${fmtMoney(p.amount)}</strong></td>
       <td class="table-actions">
         <button class="btn btn-ghost btn-sm" onclick="viewReceipt(${p.id})">RECEIPT</button>
+        <button class="btn btn-ghost btn-sm" onclick="viewGstInvoice(${p.id})">GST</button>
         <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id}, '${esc(p.receipt_no)}')">DEL</button>
       </td>
     </tr>
@@ -1468,7 +1693,7 @@ function openPaymentModal() {
           </select>
         </div>
         <div class="field">
-          <label>Amount ($)</label>
+          <label>Amount (Rs.)</label>
           <input type="number" name="amount" min="0.01" step="0.01" required placeholder="e.g. 600">
         </div>
         <div class="field">
@@ -1538,6 +1763,59 @@ async function viewReceipt(id) {
   `);
 }
 
+async function viewGstInvoice(id) {
+  const d = await api(`/api/admin/payments/${id}/invoice`);
+  const t = d.tax;
+  const itemRows = (d.items && d.items.length ? d.items : [{ code: '—', title: 'Course Fee' }])
+    .map((c, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>Course Fee — ${esc(c.title)} (${esc(c.code)})</td>
+      <td>999293</td>
+      <td>1</td>
+      <td>${fmtMoney(t.taxable)}</td>
+      <td>${fmtMoney(t.cgst)}</td>
+      <td>${fmtMoney(t.sgst)}</td>
+      <td>${fmtMoney(t.taxable + t.gst)}</td>
+    </tr>`).join('');
+  showModal('GST Tax Invoice — ' + d.invoice_no, `
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> Computing</div>
+        <div class="sheet-org">${esc(d.branch.name)} &middot; School of Computer Science &amp; Technology</div>
+        <div class="sheet-addr">${esc(d.branch.address || '')} &nbsp;|&nbsp; ${esc(d.branch.phone || '')} &nbsp;|&nbsp; ${esc(d.branch.email || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">TAX INVOICE</div>
+        <div class="sheet-docno">Invoice No. ${esc(d.invoice_no)} &nbsp;&bull;&nbsp; Date: ${esc(d.payment.paid_at || '—')} &nbsp;&bull;&nbsp; GSTIN: ${esc(d.branch.gstin || '—')}</div>
+      </div>
+      <table class="sheet-table">
+        <tr><th style="width:30%">Billed To</th><td><strong>${esc(d.student.name)}</strong> (${esc(d.student.username)})<br>${esc(d.student.mobile || '')} &nbsp; ${esc(d.student.email || '')}</td></tr>
+        <tr><th>Receipt Ref</th><td>${esc(d.payment.receipt_no)} &nbsp;(${esc(d.payment.method || '—')}) &nbsp; ${esc(d.payment.note || '')}</td></tr>
+      </table>
+      <table class="sheet-table" style="margin-top:10px">
+        <thead>
+          <tr><th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>Amount</th></tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <table class="sheet-table" style="margin-top:10px">
+        <tr><th>Taxable Value</th><td>${fmtMoney(t.taxable)}</td></tr>
+        <tr><th>CGST @ ${(t.rate / 2).toFixed(1)}%</th><td>${fmtMoney(t.cgst)}</td></tr>
+        <tr><th>SGST @ ${(t.rate / 2).toFixed(1)}%</th><td>${fmtMoney(t.sgst)}</td></tr>
+        <tr><th>Total (incl. GST @ ${t.rate}%)</th><td class="sheet-amount">${fmtMoney(t.total)}</td></tr>
+        <tr><th>Amount In Words</th><td>${esc(toIndianWords(t.total))}</td></tr>
+      </table>
+      <div class="sheet-foot">
+        <div class="sheet-sign">For VUMCA hITECH Computing</div>
+        <div class="sheet-note">This is a computer generated tax invoice.<br>${esc(d.branch.gstin ? 'GSTIN: ' + d.branch.gstin : '')}</div>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+      <button class="btn btn-purple" onclick="window.print()">PRINT</button>
+    </div>
+  `);
+}
+
 function toIndianWords(n) {
   n = Math.round(Number(n) || 0);
   if (n === 0) return 'Zero Rupees Only';
@@ -1566,6 +1844,81 @@ async function deletePayment(id, receiptNo) {
     await api('/api/admin/payments/' + id, { method: 'DELETE' });
     toast('Payment deleted');
     loadPayments();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Expenses ----------
+async function loadExpenses() {
+  const expenses = await api('/api/admin/expenses');
+  window._expenses = expenses;
+  document.getElementById('expenseRows').innerHTML = expenses.length ? expenses.map(e => `
+    <tr>
+      <td><span class="badge badge-purple">${esc(e.category)}</span></td>
+      <td><strong>${fmtMoney(e.amount)}</strong></td>
+      <td class="muted">${esc(e.note || '—')}</td>
+      <td class="muted">${esc(e.expense_date || e.created_at || '')}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openExpenseModal(${e.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id}, '${esc(e.category)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">◍</span>No expenses recorded yet.</div></td></tr>';
+}
+
+function openExpenseModal(id) {
+  const e = (window._expenses || []).find(x => x.id === id) || {};
+  showModal(e.id ? 'Edit Expense' : 'Add Expense', `
+    <form id="expenseForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Category</label>
+          <select name="category">
+            ${['Rent', 'Salaries', 'Electricity', 'Internet', 'Stationery', 'Maintenance', 'Marketing', 'Travel', 'Other'].map(c =>
+              `<option value="${c}" ${e.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Amount (Rs.)</label>
+          <input type="number" name="amount" min="0.01" step="0.01" required value="${e.amount != null ? e.amount : ''}" placeholder="e.g. 5000">
+        </div>
+        <div class="field">
+          <label>Date</label>
+          <input type="date" name="expense_date" value="${esc(e.expense_date || '')}">
+        </div>
+        <div class="field">
+          <label>Note</label>
+          <input type="text" name="note" value="${esc(e.note || '')}" placeholder="e.g. Monthly rent">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${e.id ? 'SAVE CHANGES' : 'ADD EXPENSE'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('expenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = {
+      category: f.get('category'), amount: Number(f.get('amount')),
+      note: f.get('note'), expense_date: f.get('expense_date') || undefined,
+    };
+    try {
+      if (e.id) await api('/api/admin/expenses/' + e.id, { method: 'PUT', body });
+      else await api('/api/admin/expenses', { method: 'POST', body });
+      toast(e.id ? 'Expense updated' : 'Expense recorded');
+      closeModal();
+      loadExpenses();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteExpense(id, category) {
+  if (!confirm(`Delete this ${category} expense?`)) return;
+  try {
+    await api('/api/admin/expenses/' + id, { method: 'DELETE' });
+    toast('Expense deleted');
+    loadExpenses();
   } catch (err) { toast(err.message, true); }
 }
 

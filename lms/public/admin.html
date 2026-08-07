@@ -24,16 +24,19 @@
       </div>
       <nav class="side-nav" id="sideNav">
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
+        <button class="nav-item" data-tab="branches"><span class="nav-icon">◈</span> Branches</button>
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> Courses</button>
         <button class="nav-item" data-tab="enrollments"><span class="nav-icon">⇄</span> Enrollments</button>
         <button class="nav-item" data-tab="batches"><span class="nav-icon">⧉</span> Batches & Timetable</button>
         <button class="nav-item" data-tab="faculty"><span class="nav-icon">✦</span> Faculty</button>
+        <button class="nav-item" data-tab="staff"><span class="nav-icon">☍</span> Staff</button>
         <button class="nav-item" data-tab="parents"><span class="nav-icon">◈</span> Parents</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Assignments</button>
         <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
         <button class="nav-item" data-tab="exams"><span class="nav-icon">▤</span> Exams & Results</button>
         <button class="nav-item" data-tab="payments"><span class="nav-icon">₿</span> Payments</button>
+        <button class="nav-item" data-tab="expenses"><span class="nav-icon">◍</span> Expenses</button>
         <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
         <button class="nav-item" data-tab="notifications"><span class="nav-icon">✉</span> Reminders</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
@@ -54,7 +57,13 @@
           <span class="tag" id="pageTag">// ADMIN / OVERVIEW</span>
           <span id="pageTitle">Command Center</span>
         </h1>
-        <button class="btn btn-purple btn-small" id="quickAddBtn" style="display:none">+ ADD NEW</button>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="field" style="margin:0">
+            <label>BRANCH</label>
+            <select id="branchSelect" style="min-width:160px" onchange="switchBranch()"></select>
+          </div>
+          <button class="btn btn-purple btn-small" id="quickAddBtn" style="display:none">+ ADD NEW</button>
+        </div>
       </div>
 
       <!-- Dashboard -->
@@ -68,6 +77,24 @@
             <table>
               <thead><tr><th>System</th><th>Value</th><th>Status</th></tr></thead>
               <tbody id="activityRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Branches -->
+      <section id="tab-branches" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Branches &amp; Centers</h2>
+            <button class="btn btn-purple btn-small" onclick="openBranchModal()">+ ADD BRANCH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Code</th><th>Name</th><th>GSTIN</th><th>GST %</th><th>Students</th><th>Courses</th><th>Staff</th><th>Expenses</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="branchRows"></tbody>
             </table>
           </div>
         </div>
@@ -194,6 +221,24 @@
         </div>
       </section>
 
+      <!-- Staff -->
+      <section id="tab-staff" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Staff Management</h2>
+            <button class="btn btn-purple btn-small" onclick="openStaffModal()">+ ADD STAFF</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Role</th><th>Phone</th><th>Email</th><th>Salary</th><th>Type</th><th>Joined</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="staffRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Parents -->
       <section id="tab-parents" class="tab-panel hidden">
         <div class="panel">
@@ -315,6 +360,24 @@
         </div>
       </section>
 
+      <!-- Expenses -->
+      <section id="tab-expenses" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Expense Tracking</h2>
+            <button class="btn btn-purple btn-small" onclick="openExpenseModal()">+ ADD EXPENSE</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Category</th><th>Amount</th><th>Note</th><th>Date</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="expenseRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Certificates -->
       <section id="tab-certificates" class="tab-panel hidden">
         <div class="panel">
@@ -419,6 +482,9 @@
                   <option value="courses">Course Enrollment</option>
                   <option value="payments">Payments</option>
                   <option value="exams">Exam Results</option>
+                  <option value="income">Income &amp; Expense</option>
+                  <option value="staff">Staff</option>
+                  <option value="expenses">Expenses</option>
                 </select>
               </div>
               <button class="btn btn-purple btn-small" onclick="loadReports()">GENERATE</button>

@@ -25,6 +25,17 @@ db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS branches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT NOT NULL UNIQUE,
+    address TEXT,
+    phone TEXT,
+    email TEXT,
+    gstin TEXT,
+    gst_rate REAL DEFAULT 18
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     role TEXT NOT NULL CHECK (role IN ('admin', 'student', 'faculty', 'parent')),
@@ -34,7 +45,8 @@ db.exec(`
     email TEXT,
     mobile TEXT,
     fee_amount REAL DEFAULT 0,
-    fee_paid INTEGER DEFAULT 0
+    fee_paid INTEGER DEFAULT 0,
+    branch_id INTEGER REFERENCES branches(id)
   );
 
   CREATE TABLE IF NOT EXISTS courses (
@@ -44,7 +56,31 @@ db.exec(`
     description TEXT,
     instructor TEXT,
     weeks INTEGER DEFAULT 12,
-    level TEXT DEFAULT 'Beginner'
+    level TEXT DEFAULT 'Beginner',
+    branch_id INTEGER REFERENCES branches(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS staff (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'Staff',
+    phone TEXT,
+    email TEXT,
+    salary REAL DEFAULT 0,
+    salary_type TEXT DEFAULT 'monthly',
+    join_date TEXT,
+    status TEXT DEFAULT 'active'
+  );
+
+  CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    note TEXT,
+    expense_date TEXT DEFAULT (date('now')),
+    created_at TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS enrollments (
@@ -82,6 +118,7 @@ db.exec(`
     method TEXT DEFAULT 'cash',
     receipt_no TEXT,
     note TEXT,
+    branch_id INTEGER REFERENCES branches(id),
     paid_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -224,12 +261,13 @@ function migrate() {
         email TEXT,
         mobile TEXT,
         fee_amount REAL DEFAULT 0,
-        fee_paid INTEGER DEFAULT 0
+        fee_paid INTEGER DEFAULT 0,
+        branch_id INTEGER
       )
     `);
     db.exec(`
-      INSERT INTO users (id, role, username, password_hash, name, email, mobile, fee_amount, fee_paid)
-      SELECT id, role, username, password_hash, name, email, mobile, fee_amount, fee_paid FROM users_old
+      INSERT INTO users (id, role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id)
+      SELECT id, role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id FROM users_old
     `);
     db.exec('DROP TABLE users_old');
     db.exec('PRAGMA legacy_alter_table = OFF');
@@ -245,18 +283,45 @@ function migrate() {
   if (!examCols.includes('duration_minutes')) {
     db.exec('ALTER TABLE exams ADD COLUMN duration_minutes INTEGER DEFAULT 0');
   }
+
+  const addCol = (table, def) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(def.split(' ')[0])) db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`);
+  };
+  addCol('users', 'branch_id INTEGER');
+  addCol('courses', 'branch_id INTEGER');
+  addCol('payments', 'branch_id INTEGER');
+}
+
+// Backfills branch_id on rows created before branches existed, and guarantees a
+// default branch exists so every record belongs to a branch.
+function ensureBranch() {
+  const count = db.prepare('SELECT COUNT(*) AS c FROM branches').get().c;
+  if (count === 0) {
+    db.prepare(
+      'INSERT INTO branches (name, code, address, phone, email, gstin, gst_rate) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run('Main Campus', 'MAIN', 'Plot 14, Sector 7, New Mumbai - 400 710', '+91 98765 43210',
+          'accounts@vumcahitech.io', '27ABCDE1234F1Z5', 18);
+  }
+  const def = db.prepare('SELECT id FROM branches ORDER BY id LIMIT 1').get();
+  db.prepare('UPDATE users SET branch_id = ? WHERE branch_id IS NULL').run(def.id);
+  db.prepare('UPDATE courses SET branch_id = ? WHERE branch_id IS NULL').run(def.id);
+  db.prepare('UPDATE payments SET branch_id = ? WHERE branch_id IS NULL').run(def.id);
 }
 
 function seed() {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (userCount > 0) return;
 
+  const defBranch = db.prepare('SELECT id FROM branches ORDER BY id LIMIT 1').get();
+  const bid = defBranch ? defBranch.id : 1;
+
   const insertUser = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
 
   const adminHash = bcrypt.hashSync('admin123', 10);
-  insertUser.run('admin', 'admin', adminHash, 'System Administrator', 'admin@vumcahitech.io', '+1 555 010 0000', 0, 1);
+  insertUser.run('admin', 'admin', adminHash, 'System Administrator', 'admin@vumcahitech.io', '+1 555 010 0000', 0, 1, bid);
 
   const studentData = [
     ['STU001', 'Aarav Sharma', 'aarav@example.com', 'student123', '+91 98765 43210', 1200, 1],
@@ -270,12 +335,12 @@ function seed() {
   const studentIds = [];
   for (const [username, name, email, pass, mobile, feeAmount, feePaid] of studentData) {
     const hash = bcrypt.hashSync(pass, 10);
-    const res = insertUser.run('student', username, hash, name, email, mobile, feeAmount, feePaid);
+    const res = insertUser.run('student', username, hash, name, email, mobile, feeAmount, feePaid, bid);
     studentIds.push(res.lastInsertRowid);
   }
 
   const insertCourse = db.prepare(
-    'INSERT INTO courses (code, title, description, instructor, weeks, level) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO courses (code, title, description, instructor, weeks, level, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
   const courses = [
     ['CS101', 'Intro to Programming', 'Python fundamentals, algorithms and problem-solving techniques.', 'Dr. Alan Vega', 12, 'Beginner'],
@@ -286,7 +351,7 @@ function seed() {
   ];
   const courseIds = [];
   for (const c of courses) {
-    const res = insertCourse.run(...c);
+    const res = insertCourse.run(...c, bid);
     courseIds.push(res.lastInsertRowid);
   }
 
@@ -395,8 +460,9 @@ function seedModules() {
     setMobile.run(mob, u);
   }
   const insertUser = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
+  const defBranchId = () => db.prepare('SELECT id FROM branches ORDER BY id LIMIT 1').get().id;
   const today = new Date();
   const formatDate = (d) => d.toISOString().slice(0, 10);
   const formatFut = (n) => formatDate(new Date(today.getTime() + n * 86400000));
@@ -411,7 +477,7 @@ function seedModules() {
     const facultyIds = [];
     for (const [username, name, email, pass, mobile] of facultyData) {
       const hash = bcrypt.hashSync(pass, 10);
-      const res = insertUser.run('faculty', username, hash, name, email, mobile, 0, 1);
+      const res = insertUser.run('faculty', username, hash, name, email, mobile, 0, 1, defBranchId());
       facultyIds.push(res.lastInsertRowid);
     }
     const insertFacultyCourse = db.prepare(
@@ -437,7 +503,7 @@ function seedModules() {
     );
     for (const [username, name, stuUser, pass] of parentData) {
       const hash = bcrypt.hashSync(pass, 10);
-      const parentRes = insertUser.run('parent', username, hash, name, null, null, 0, 1);
+      const parentRes = insertUser.run('parent', username, hash, name, null, null, 0, 1, defBranchId());
       const stuRow = db.prepare('SELECT id FROM users WHERE username = ?').get(stuUser);
       insertParentLink.run(parentRes.lastInsertRowid, stuRow.id);
     }
@@ -490,11 +556,12 @@ function seedModules() {
   // ---- Payments / receipts ----
   if (count('payments') === 0) {
     const insertPayment = db.prepare(
-      'INSERT INTO payments (student_id, amount, method, receipt_no, note, paid_at) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO payments (student_id, amount, method, receipt_no, note, branch_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-    insertPayment.run(studentIds[0], 600, 'cash', 'RCP-2026-0001', 'First installment', formatFut(-10) + ' 10:30:00');
-    insertPayment.run(studentIds[0], 600, 'upi', 'RCP-2026-0002', 'Second installment', formatFut(-3) + ' 12:00:00');
-    insertPayment.run(studentIds[1], 1200, 'card', 'RCP-2026-0003', 'Full payment', formatFut(-5) + ' 15:45:00');
+    const pbid = defBranchId();
+    insertPayment.run(studentIds[0], 600, 'cash', 'RCP-2026-0001', 'First installment', pbid, formatFut(-10) + ' 10:30:00');
+    insertPayment.run(studentIds[0], 600, 'upi', 'RCP-2026-0002', 'Second installment', pbid, formatFut(-3) + ' 12:00:00');
+    insertPayment.run(studentIds[1], 1200, 'card', 'RCP-2026-0003', 'Full payment', pbid, formatFut(-5) + ' 15:45:00');
   }
 
   // ---- Exams + results ----
@@ -534,9 +601,33 @@ function seedModules() {
     insertNotification.run(studentIds[3], 'whatsapp', 'fee', 'Reminder: your fee of Rs. 1200 is pending. Please pay before the due date.', 'sent', formatFut(-1) + ' 09:00:00');
     insertNotification.run(studentIds[4], 'sms', 'class', 'Reminder: CS105 class tomorrow at 10:00. Don\'t forget!', 'sent', formatFut(-1) + ' 09:05:00');
   }
+
+  // ---- Staff ----
+  if (count('staff') === 0) {
+    const insertStaff = db.prepare(
+      'INSERT INTO staff (branch_id, name, role, phone, email, salary, salary_type, join_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const sbid = defBranchId();
+    insertStaff.run(sbid, 'Sunita Deshmukh', 'Office Manager', '+91 98200 12345', 'office@vumcahitech.io', 18000, 'monthly', '2024-06-01', 'active');
+    insertStaff.run(sbid, 'Rahul Kulkarni', 'Accountant', '+91 98200 54321', 'accounts@vumcahitech.io', 15000, 'monthly', '2024-08-15', 'active');
+    insertStaff.run(sbid, 'Priya Nair', 'Front Desk', '+91 98200 98765', 'frontdesk@vumcahitech.io', 12000, 'monthly', '2025-01-05', 'active');
+  }
+
+  // ---- Expenses ----
+  if (count('expenses') === 0) {
+    const insertExpense = db.prepare(
+      'INSERT INTO expenses (branch_id, category, amount, note, expense_date) VALUES (?, ?, ?, ?, ?)'
+    );
+    const ebid = defBranchId();
+    insertExpense.run(ebid, 'Rent', 25000, 'Monthly premises rent', formatFut(-18));
+    insertExpense.run(ebid, 'Electricity', 3200, 'Utility bill', formatFut(-15));
+    insertExpense.run(ebid, 'Internet', 999, 'Broadband + backup line', formatFut(-12));
+    insertExpense.run(ebid, 'Stationery', 1450, 'Printing and paper', formatFut(-9));
+  }
 }
 
 migrate();
+ensureBranch();
 seed();
 seedModules();
 

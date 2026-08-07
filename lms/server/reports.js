@@ -4,14 +4,17 @@ const db = require('./db');
 
 const pct = (num, den) => (den ? Math.round((num / den) * 100) : 0);
 
-function studentsReport() {
+const bw = (alias, bid) => (bid ? `${alias}.branch_id = ?` : '1=1');
+const args = (bid) => (bid ? [bid] : []);
+
+function studentsReport(bid) {
   const rows = db.prepare(`
     SELECT u.username, u.name, u.email, u.mobile, u.fee_amount, u.fee_paid,
       (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) AS course_count,
       (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days,
       (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id) AS total_days
-    FROM users u WHERE u.role = 'student' ORDER BY u.name
-  `).all();
+    FROM users u WHERE u.role = 'student' AND ${bw('u', bid)} ORDER BY u.name
+  `).all(...args(bid));
   return {
     title: 'Student Master Report',
     summary: [
@@ -27,11 +30,11 @@ function studentsReport() {
   };
 }
 
-function feesReport() {
+function feesReport(bid) {
   const rows = db.prepare(`
     SELECT u.username, u.name, u.fee_amount, u.fee_paid FROM users u
-    WHERE u.role = 'student' ORDER BY u.name
-  `).all();
+    WHERE u.role = 'student' AND ${bw('u', bid)} ORDER BY u.name
+  `).all(...args(bid));
   const total = rows.reduce((s, r) => s + (r.fee_amount || 0), 0);
   const collected = rows.filter(r => r.fee_paid).reduce((s, r) => s + (r.fee_amount || 0), 0);
   const pending = total - collected;
@@ -53,17 +56,20 @@ function feesReport() {
   };
 }
 
-function attendanceReport() {
+function attendanceReport(bid) {
   const rows = db.prepare(`
     SELECT u.username, u.name,
       SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
       SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late,
       SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
       COUNT(a.id) AS total
-    FROM users u LEFT JOIN attendance a ON a.student_id = u.id
-    WHERE u.role = 'student'
+    FROM users u
+    LEFT JOIN enrollments e ON e.student_id = u.id
+    LEFT JOIN courses c ON c.id = e.course_id AND ${bw('c', bid)}
+    LEFT JOIN attendance a ON a.student_id = u.id AND a.course_id = c.id
+    WHERE u.role = 'student' AND ${bw('u', bid)}
     GROUP BY u.id ORDER BY u.name
-  `).all();
+  `).all(...args(bid));
   return {
     title: 'Attendance Report',
     summary: [
@@ -77,7 +83,7 @@ function attendanceReport() {
   };
 }
 
-function gradesReport() {
+function gradesReport(bid) {
   const rows = db.prepare(`
     SELECT u.username, u.name, c.code AS course_code, a.title AS assignment,
            s.score, a.max_score
@@ -85,9 +91,9 @@ function gradesReport() {
     JOIN users u ON u.id = s.student_id
     JOIN assignments a ON a.id = s.assignment_id
     JOIN courses c ON c.id = a.course_id
-    WHERE s.score IS NOT NULL
+    WHERE s.score IS NOT NULL AND ${bw('c', bid)}
     ORDER BY u.name, a.due_date
-  `).all();
+  `).all(...args(bid));
   return {
     title: 'Assignment Grades Report',
     summary: [
@@ -99,15 +105,16 @@ function gradesReport() {
   };
 }
 
-function quizzesReport() {
+function quizzesReport(bid) {
   const rows = db.prepare(`
     SELECT u.username, u.name, c.code AS course_code, q.title AS quiz, qa.score, qa.total
     FROM quiz_attempts qa
     JOIN users u ON u.id = qa.student_id
     JOIN quizzes q ON q.id = qa.quiz_id
     JOIN courses c ON c.id = q.course_id
+    WHERE ${bw('c', bid)}
     ORDER BY qa.id DESC
-  `).all();
+  `).all(...args(bid));
   return {
     title: 'Quiz Results Report',
     summary: [
@@ -119,15 +126,15 @@ function quizzesReport() {
   };
 }
 
-function coursesReport() {
+function coursesReport(bid) {
   const rows = db.prepare(`
     SELECT c.code, c.title, c.instructor, c.level,
       (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS students,
       (SELECT COUNT(*) FROM assignments a WHERE a.course_id = c.id) AS assignments,
       (SELECT COUNT(*) FROM quizzes q WHERE q.course_id = c.id) AS quizzes,
       (SELECT COUNT(*) FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE a.course_id = c.id) AS submissions
-    FROM courses c ORDER BY c.code
-  `).all();
+    FROM courses c WHERE ${bw('c', bid)} ORDER BY c.code
+  `).all(...args(bid));
   return {
     title: 'Course Enrollment Report',
     summary: [
@@ -139,12 +146,13 @@ function coursesReport() {
   };
 }
 
-function paymentsReport() {
+function paymentsReport(bid) {
   const rows = db.prepare(`
     SELECT p.receipt_no, u.username, u.name, p.amount, p.method, p.note, p.paid_at
     FROM payments p JOIN users u ON u.id = p.student_id
+    WHERE ${bw('p', bid)}
     ORDER BY p.paid_at DESC
-  `).all();
+  `).all(...args(bid));
   return {
     title: 'Payments Report',
     summary: [
@@ -156,14 +164,15 @@ function paymentsReport() {
   };
 }
 
-function examsReport() {
+function examsReport(bid) {
   const rows = db.prepare(`
     SELECT c.code AS course_code, x.title, x.exam_date, x.max_marks,
       (SELECT COUNT(*) FROM exam_results r WHERE r.exam_id = x.id) AS results,
       (SELECT AVG(r.marks) FROM exam_results r WHERE r.exam_id = x.id) AS avg_marks
     FROM exams x JOIN courses c ON c.id = x.course_id
+    WHERE ${bw('c', bid)}
     ORDER BY x.exam_date
-  `).all();
+  `).all(...args(bid));
   return {
     title: 'Exam Results Report',
     summary: [
@@ -173,6 +182,88 @@ function examsReport() {
     columns: ['Course', 'Exam', 'Date', 'Max Marks', 'Results', 'Average'],
     rows: rows.map(r => [r.course_code, r.title, r.exam_date || '—', r.max_marks, r.results,
                          r.avg_marks != null ? Math.round(r.avg_marks) + '/' + r.max_marks : '—']),
+  };
+}
+
+function incomeReport(bid) {
+  const incomeRows = db.prepare(`
+    SELECT substr(p.paid_at, 1, 7) AS month, COUNT(*) AS txns, COALESCE(SUM(p.amount), 0) AS amount
+    FROM payments p JOIN users u ON u.id = p.student_id
+    WHERE ${bw('p', bid)}
+    GROUP BY month ORDER BY month
+  `).all(...args(bid));
+  const expenseRows = db.prepare(`
+    SELECT substr(e.expense_date, 1, 7) AS month, COUNT(*) AS txns, COALESCE(SUM(e.amount), 0) AS amount
+    FROM expenses e
+    WHERE ${bw('e', bid)}
+    GROUP BY month ORDER BY month
+  `).all(...args(bid));
+
+  const months = [...new Set([...incomeRows.map(r => r.month), ...expenseRows.map(r => r.month)])].filter(Boolean).sort();
+  const byMonth = months.map(m => {
+    const inc = incomeRows.find(r => r.month === m);
+    const exp = expenseRows.find(r => r.month === m);
+    return {
+      month: m,
+      income: inc ? inc.amount : 0,
+      incomeTxns: inc ? inc.txns : 0,
+      expense: exp ? exp.amount : 0,
+      expenseTxns: exp ? exp.txns : 0,
+    };
+  });
+  const totalIncome = byMonth.reduce((s, r) => s + r.income, 0);
+  const totalExpense = byMonth.reduce((s, r) => s + r.expense, 0);
+  return {
+    title: 'Income & Expense Report',
+    summary: [
+      { label: 'Income (Fees)', value: formatMoney(totalIncome) },
+      { label: 'Expenses', value: formatMoney(totalExpense) },
+      { label: 'Net Income', value: formatMoney(totalIncome - totalExpense) },
+      { label: 'Months', value: byMonth.length },
+    ],
+    columns: ['Month', 'Income', 'Income Txns', 'Expenses', 'Expense Txns', 'Net'],
+    rows: byMonth.map(r => [
+      r.month, formatMoney(r.income), r.incomeTxns, formatMoney(r.expense), r.expenseTxns,
+      formatMoney(r.income - r.expense),
+    ]),
+  };
+}
+
+function staffReport(bid) {
+  const rows = db.prepare(`
+    SELECT s.name, s.role, s.phone, s.email, s.salary, s.salary_type, s.join_date, s.status
+    FROM staff s WHERE ${bw('s', bid)} ORDER BY s.name
+  `).all(...args(bid));
+  const monthly = rows.filter(r => r.salary_type === 'monthly').reduce((s, r) => s + (r.salary || 0), 0);
+  return {
+    title: 'Staff Report',
+    summary: [
+      { label: 'Staff Members', value: rows.length },
+      { label: 'Active', value: rows.filter(r => r.status === 'active').length },
+      { label: 'Monthly Payroll', value: formatMoney(monthly) },
+    ],
+    columns: ['Name', 'Role', 'Phone', 'Email', 'Salary', 'Type', 'Join Date', 'Status'],
+    rows: rows.map(r => [r.name, r.role, r.phone || '—', r.email || '—', formatMoney(r.salary),
+                         r.salary_type, r.join_date || '—', r.status]),
+  };
+}
+
+function expensesReport(bid) {
+  const rows = db.prepare(`
+    SELECT e.category, e.amount, e.note, e.expense_date, e.created_at
+    FROM expenses e WHERE ${bw('e', bid)} ORDER BY e.expense_date DESC
+  `).all(...args(bid));
+  const byCat = {};
+  for (const r of rows) byCat[r.category] = (byCat[r.category] || 0) + (r.amount || 0);
+  return {
+    title: 'Expense Report',
+    summary: [
+      { label: 'Transactions', value: rows.length },
+      { label: 'Total Expenses', value: formatMoney(rows.reduce((s, r) => s + (r.amount || 0), 0)) },
+      { label: 'Top Category', value: Object.entries(byCat).sort((a, b) => b[1] - a[1])[0]?.[0] || '—' },
+    ],
+    columns: ['Category', 'Amount', 'Note', 'Date'],
+    rows: rows.map(r => [r.category, formatMoney(r.amount), r.note || '—', r.expense_date || '—']),
   };
 }
 
@@ -189,6 +280,9 @@ const builders = {
   courses: coursesReport,
   payments: paymentsReport,
   exams: examsReport,
+  income: incomeReport,
+  staff: staffReport,
+  expenses: expensesReport,
 };
 
 module.exports = { builders, formatMoney };
