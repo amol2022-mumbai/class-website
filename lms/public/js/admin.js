@@ -5,6 +5,7 @@ let editingQuiz = null;
 const tabTitles = {
   dashboard: ['// ADMIN / OVERVIEW', 'Command Center'],
   branches: ['// ADMIN / BRANCHES', 'Branches & Centers'],
+  enquiries: ['// ADMIN / ENQUIRIES', 'Enquiry & Lead Funnel'],
   students: ['// ADMIN / STUDENTS', 'Student Records'],
   courses: ['// ADMIN / COURSES', 'Course Catalog'],
   enrollments: ['// ADMIN / ENROLLMENTS', 'Enrollment Matrix'],
@@ -16,6 +17,8 @@ const tabTitles = {
   quizzes: ['// ADMIN / QUIZZES', 'Quizzes'],
   exams: ['// ADMIN / EXAMS', 'Exams & Results'],
   payments: ['// ADMIN / PAYMENTS', 'Payments & Receipts'],
+  fees: ['// ADMIN / FEES', 'Fees & Installments'],
+  payroll: ['// ADMIN / PAYROLL', 'Payroll & Staff Attendance'],
   expenses: ['// ADMIN / EXPENSES', 'Expense Tracking'],
   certificates: ['// ADMIN / CERTIFICATES', 'Certificates'],
   notifications: ['// ADMIN / REMINDERS', 'Reminders & Notifications'],
@@ -37,6 +40,7 @@ const tabTitles = {
     const active = document.querySelector('.nav-item.active');
     const tab = active.dataset.tab;
     if (tab === 'students') openStudentModal();
+    else if (tab === 'enquiries') openEnquiryModal();
     else if (tab === 'courses') openCourseModal();
     else if (tab === 'assignments') openAssignmentModal();
     else if (tab === 'quizzes') openQuizModal();
@@ -55,6 +59,8 @@ const tabTitles = {
   await loadBranchSelect();
   switchTab('dashboard');
   document.getElementById('attDate').value = todayStr();
+  document.getElementById('staffAttDate').value = todayStr();
+  document.getElementById('payrollMonth').value = todayStr().slice(0, 7);
 })();
 
 async function loadBranchSelect() {
@@ -93,6 +99,7 @@ function switchTab(tab) {
 
   if (tab === 'dashboard') loadStats();
   else if (tab === 'branches') loadBranches();
+  else if (tab === 'enquiries') loadEnquiries();
   else if (tab === 'students') loadStudents();
   else if (tab === 'courses') loadCourses();
   else if (tab === 'enrollments') loadEnrollments();
@@ -104,6 +111,8 @@ function switchTab(tab) {
   else if (tab === 'quizzes') loadQuizzes();
   else if (tab === 'exams') loadExams();
   else if (tab === 'payments') loadPayments();
+  else if (tab === 'fees') loadFeesPlan();
+  else if (tab === 'payroll') { loadStaffAttendance(); loadPayslips(); }
   else if (tab === 'expenses') loadExpenses();
   else if (tab === 'certificates') loadCertificates();
   else if (tab === 'notifications') loadNotifications();
@@ -207,11 +216,12 @@ async function loadStats() {
   const s = await api('/api/admin/stats');
   const cards = [
     { label: 'Students', value: s.students },
+    { label: 'Open Enquiries', value: s.openEnquiries || 0, cls: 'purple' },
+    { label: 'Overdue Fees', value: s.overdueFees || 0, cls: s.overdueFees > 0 ? 'red' : 'green' },
     { label: 'Courses', value: s.courses },
     { label: 'Assignments', value: s.assignments },
     { label: 'Quizzes', value: s.quizzes },
     { label: 'Enrollments', value: s.enrollments, cls: 'purple' },
-    { label: 'Submissions', value: s.submissions, cls: 'purple' },
     { label: 'Present Today', value: s.presentToday, cls: 'green' },
   ];
   document.getElementById('statGrid').innerHTML = cards.map(c => `
@@ -240,21 +250,25 @@ async function loadStats() {
 // ---------- Students ----------
 async function loadStudents() {
   const students = await api('/api/admin/students');
+  window._students = students;
   document.getElementById('studentRows').innerHTML = students.length ? students.map(s => `
     <tr>
       <td><span class="badge badge-cyan">${esc(s.username)}</span></td>
       <td><strong>${esc(s.name)}</strong></td>
       <td class="muted">${esc(s.email || '—')}</td>
       <td class="muted">${esc(s.mobile || '—')}</td>
-      <td>${fmtMoney(s.fee_amount)} <span class="badge ${s.fee_paid ? 'badge-green' : 'badge-red'}" style="margin-left:4px">${s.fee_paid ? 'PAID' : 'DUE'}</span></td>
+      <td>${fmtMoney(s.fee_amount)} ${s.fee_installments > 1 ? `<span class="badge badge-purple">×${s.fee_installments}</span>` : ''}</td>
+      <td>${s.discount_amount > 0 ? `<span class="badge badge-cyan" title="${esc(s.discount_type === 'percent' ? s.discount_value + '%' : 'Rs.' + s.discount_value)}">−${fmtMoney(s.discount_amount)}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${s.pending > 0 ? `<strong style="color:var(--red)">${fmtMoney(s.pending)}</strong>` : '<span class="badge badge-green">CLEARED</span>'}</td>
       <td>${s.course_count}</td>
       <td>${s.present_days}</td>
       <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="viewStudentPlan(${s.id})">PLAN</button>
         <button class="btn btn-ghost btn-sm" onclick='openStudentModal(${JSON.stringify(s)})'>EDIT</button>
         <button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id}, '${esc(s.name)}')">DELETE</button>
       </td>
     </tr>
-  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
+  `).join('') : '<tr><td colspan="10"><div class="empty-state"><span class="es-icon">▣</span>No students registered yet.</div></td></tr>';
 }
 
 function openStudentModal(student) {
@@ -289,6 +303,27 @@ function openStudentModal(student) {
           <input type="number" name="fee_amount" min="0" step="0.01" value="${student ? student.fee_amount || 0 : 0}">
         </div>
         <div class="field">
+          <label>Concession / Discount</label>
+          <select name="discount_type">
+            <option value="none" ${student && student.discount_type === 'none' ? 'selected' : ''}>None</option>
+            <option value="percent" ${student && student.discount_type === 'percent' ? 'selected' : ''}>Percentage (%)</option>
+            <option value="fixed" ${student && student.discount_type === 'fixed' ? 'selected' : ''}>Fixed (Rs.)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Concession Value</label>
+          <input type="number" name="discount_value" min="0" step="0.01" value="${student && student.discount_value ? student.discount_value : 0}" placeholder="e.g. 10">
+        </div>
+        <div class="field">
+          <label>Installments</label>
+          <input type="number" name="fee_installments" min="1" max="12" value="${student && student.fee_installments > 1 ? student.fee_installments : 1}">
+          <small class="muted">>1 generates a due-date schedule</small>
+        </div>
+        <div class="field">
+          <label>Fee Start Date (installments)</label>
+          <input type="date" name="fee_start_date" value="${esc(student && student.fee_start_date ? student.fee_start_date : '')}">
+        </div>
+        <div class="field">
           <label>Fee Paid</label>
           <select name="fee_paid">
             <option value="1" ${student && student.fee_paid ? 'selected' : ''}>Yes — paid</option>
@@ -314,6 +349,9 @@ function openStudentModal(student) {
     const payload = {
       name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'),
       fee_amount: Number(f.get('fee_amount')) || 0, fee_paid: Number(f.get('fee_paid')) === 1,
+      discount_type: f.get('discount_type'), discount_value: Number(f.get('discount_value')) || 0,
+      fee_installments: Number(f.get('fee_installments')) || 1,
+      fee_start_date: f.get('fee_start_date') || undefined,
     };
     try {
       if (isEdit) {
@@ -322,8 +360,7 @@ function openStudentModal(student) {
       } else {
         await api('/api/admin/students', { method: 'POST', body: {
           username: f.get('username'), password: f.get('password'),
-          name: f.get('name'), email: f.get('email'), mobile: f.get('mobile'),
-          fee_amount: Number(f.get('fee_amount')) || 0, fee_paid: Number(f.get('fee_paid')) === 1,
+          ...payload,
         }});
       }
       toast(isEdit ? 'Student updated' : 'Student created');
@@ -339,6 +376,283 @@ async function deleteStudent(id, name) {
     await api('/api/admin/students/' + id, { method: 'DELETE' });
     toast('Student deleted');
     loadStudents();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Enquiries / Leads ----------
+async function loadEnquiries() {
+  const [enquiries, courses] = await Promise.all([api('/api/admin/enquiries'), api('/api/admin/courses')]);
+  window._enquiries = enquiries;
+  window._enqCourses = courses;
+  const statusBadge = { new: 'badge-yellow', contacted: 'badge-cyan', 'follow-up': 'badge-purple', enrolled: 'badge-green', lost: 'badge-red' };
+  const today = todayStr();
+  document.getElementById('enquiryRows').innerHTML = enquiries.length ? enquiries.map(en => `
+    <tr>
+      <td><strong>${esc(en.name)}</strong></td>
+      <td class="muted">${esc(en.phone || '—')}<br>${esc(en.email || '')}</td>
+      <td class="muted">${en.course_id ? `${esc(en.course_code)} — ${esc(en.course_title)}` : '—'}</td>
+      <td class="muted">${esc(en.source || '—')}</td>
+      <td><span class="badge ${statusBadge[en.status] || 'badge-yellow'}">${esc(en.status)}</span></td>
+      <td class="muted">${en.followup_date ? `${esc(en.followup_date)}${en.followup_date <= today && en.status !== 'enrolled' && en.status !== 'lost' ? ' <span class="badge badge-red">TODAY</span>' : ''}` : '—'}</td>
+      <td class="muted">${esc((en.created_at || '').slice(0, 10))}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openEnquiryModal(${en.id})">EDIT</button>
+        <select class="btn btn-sm enq-status" style="padding:4px 6px;max-width:120px" onchange="setEnquiryStatus(${en.id}, this.value)">
+          <option value="new" ${en.status === 'new' ? 'selected' : ''}>New</option>
+          <option value="contacted" ${en.status === 'contacted' ? 'selected' : ''}>Contacted</option>
+          <option value="follow-up" ${en.status === 'follow-up' ? 'selected' : ''}>Follow-up</option>
+          <option value="enrolled" ${en.status === 'enrolled' ? 'selected' : ''}>Enrolled</option>
+          <option value="lost" ${en.status === 'lost' ? 'selected' : ''}>Lost</option>
+        </select>
+        <button class="btn btn-danger btn-sm" onclick="deleteEnquiry(${en.id}, '${esc(en.name)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">⚑</span>No enquiries yet. Capture leads here.</div></td></tr>';
+}
+
+function openEnquiryModal(id) {
+  const en = (window._enquiries || []).find(x => x.id === id) || {};
+  showModal(en.id ? 'Edit Enquiry' : 'Add Enquiry', `
+    <form id="enquiryForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" name="name" required value="${esc(en.name || '')}" placeholder="e.g. Rohan Kulkarni">
+        </div>
+        <div class="field">
+          <label>Phone</label>
+          <input type="tel" name="phone" value="${esc(en.phone || '')}" placeholder="e.g. +91 98xxxx">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="${esc(en.email || '')}" placeholder="lead@example.com">
+        </div>
+        <div class="field">
+          <label>Course of Interest</label>
+          <select name="course_id">
+            <option value="">— Not selected —</option>
+            ${(window._enqCourses || []).map(c => `<option value="${c.id}" ${en.course_id == c.id ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Source</label>
+          <select name="source">
+            ${['Walk-in', 'Website', 'Referral', 'Social Media', 'Phone Call', 'Ads', 'Other'].map(x => `<option value="${x}" ${en.source === x ? 'selected' : ''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select name="status">
+            ${['new', 'contacted', 'follow-up', 'enrolled', 'lost'].map(x => `<option value="${x}" ${en.status === x ? 'selected' : ''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Follow-up Date</label>
+          <input type="date" name="followup_date" value="${esc(en.followup_date || '')}">
+        </div>
+        <div class="field span-2">
+          <label>Notes</label>
+          <textarea name="notes" rows="2" placeholder="Interests, questions, batch preference...">${esc(en.notes || '')}</textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${en.id ? 'SAVE CHANGES' : 'ADD ENQUIRY'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('enquiryForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = {
+      name: f.get('name'), phone: f.get('phone'), email: f.get('email'),
+      course_id: f.get('course_id') ? Number(f.get('course_id')) : null,
+      source: f.get('source'), status: f.get('status'),
+      notes: f.get('notes'), followup_date: f.get('followup_date') || undefined,
+    };
+    try {
+      if (en.id) await api('/api/admin/enquiries/' + en.id, { method: 'PUT', body });
+      else await api('/api/admin/enquiries', { method: 'POST', body });
+      toast(en.id ? 'Enquiry updated' : 'Enquiry added');
+      closeModal();
+      loadEnquiries();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function setEnquiryStatus(id, status) {
+  try {
+    await api('/api/admin/enquiries/' + id, { method: 'PUT', body: { status } });
+    toast('Status → ' + status);
+    loadEnquiries();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteEnquiry(id, name) {
+  if (!confirm(`Delete enquiry for "${name}"?`)) return;
+  try {
+    await api('/api/admin/enquiries/' + id, { method: 'DELETE' });
+    toast('Enquiry deleted');
+    loadEnquiries();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Fees & Installments ----------
+async function loadFeesPlan() {
+  const students = await api('/api/admin/students');
+  document.getElementById('feesPlanRows').innerHTML = students.length ? students.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong> <span class="muted">(${esc(s.username)})</span></td>
+      <td>${fmtMoney(s.fee_amount)}</td>
+      <td>${s.discount_amount > 0 ? fmtMoney(s.discount_amount) : '<span class="muted">—</span>'}</td>
+      <td>${fmtMoney(s.effective_fee)}</td>
+      <td>${fmtMoney(s.paid || 0)}</td>
+      <td>${s.pending > 0 ? `<strong style="color:var(--red)">${fmtMoney(s.pending)}</strong>` : '<span class="badge badge-green">0</span>'}</td>
+      <td>${s.fee_installments > 1 ? `<span class="badge badge-purple">${s.fee_installments} × ${fmtMoney(s.effective_fee / s.fee_installments)}</span>` : '<span class="muted">Lump sum</span>'}</td>
+      <td><span class="badge ${s.pending > 0 ? 'badge-red' : 'badge-green'}">${s.pending > 0 ? 'DUE' : 'PAID'}</span></td>
+      <td class="table-actions"><button class="btn btn-ghost btn-sm" onclick="viewStudentPlan(${s.id})">VIEW PLAN</button></td>
+    </tr>
+  `).join('') : '<tr><td colspan="9"><div class="empty-state"><span class="es-icon">≋</span>No students yet.</div></td></tr>';
+}
+
+async function viewStudentPlan(id) {
+  const d = await api(`/api/admin/students/${id}/plan`);
+  const statusBadge = { paid: 'badge-green', overdue: 'badge-red', pending: 'badge-yellow' };
+  const planRows = (d.installments && d.installments.length)
+    ? d.installments.map(i => `
+      <tr>
+        <td>${esc(i.label)}</td>
+        <td>${esc(i.due_date || '—')}</td>
+        <td>${fmtMoney(i.amount)}</td>
+        <td>${fmtMoney(i.paid_amount)}</td>
+        <td>${fmtMoney(i.outstanding)}</td>
+        <td><span class="badge ${statusBadge[i.status] || 'badge-yellow'}">${esc(i.status)}</span></td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="muted">No installment plan — fee paid as a single amount.</td></tr>`;
+  showModal('Fee Plan — ' + d.student_id, `
+    <div class="stat-grid" style="margin-bottom:14px">
+      <div class="stat-card purple"><div class="stat-num">${fmtMoney(d.effective_fee)}</div><div class="stat-label">Net Fee</div></div>
+      <div class="stat-card green"><div class="stat-num">${fmtMoney(d.total_paid)}</div><div class="stat-label">Paid</div></div>
+      <div class="stat-card ${d.pending > 0 ? 'red' : 'green'}"><div class="stat-num">${fmtMoney(d.pending)}</div><div class="stat-label">Pending</div></div>
+      ${d.overdue_count ? `<div class="stat-card red"><div class="stat-num">${d.overdue_count}</div><div class="stat-label">Overdue</div></div>` : ''}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Label</th><th>Due Date</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th></tr></thead>
+        <tbody>${planRows}</tbody>
+      </table>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+      <button class="btn btn-purple" onclick="openPaymentModal()">RECORD PAYMENT</button>
+    </div>
+  `);
+  window._payForStudent = id;
+}
+
+// ---------- Payroll & Staff Attendance ----------
+async function loadStaffAttendance() {
+  const date = document.getElementById('staffAttDate').value || todayStr();
+  const d = await api('/api/admin/staff/attendance?date=' + date);
+  const opts = ['present', 'half-day', 'absent', 'leave'];
+  document.getElementById('staffAttendanceView').innerHTML = d.staff.length ? `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Staff</th><th>Role</th><th>Status (${esc(d.date)})</th></tr></thead>
+        <tbody>${d.staff.map(s => `
+          <tr>
+            <td><strong>${esc(s.name)}</strong></td>
+            <td class="muted">${esc(s.role || '—')}</td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${opts.map(o => `
+                  <button class="btn btn-sm att-btn ${s.att_status === o ? 'active-' + (o === 'present' ? 'present' : o === 'half-day' ? 'late' : o === 'absent' ? 'absent' : 'late') : ''}"
+                          onclick="markStaffAttendance(${s.id}, '${esc(d.date)}', '${o}')">${o.toUpperCase()}</button>`).join('')}
+              </div>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div class="empty-state"><span class="es-icon">☰</span>No active staff in this branch.</div>';
+}
+
+async function markStaffAttendance(staffId, date, status) {
+  try {
+    await api('/api/admin/staff/attendance', { method: 'POST', body: { staff_id: staffId, date, status } });
+    toast(status + ' saved');
+    loadStaffAttendance();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadPayslips() {
+  const month = document.getElementById('payrollMonth').value || todayStr().slice(0, 7);
+  const d = await api('/api/admin/payroll?month=' + month);
+  document.getElementById('payslipRows').innerHTML = d.slips.length ? d.slips.map(p => `
+    <tr>
+      <td><strong>${esc(p.name)}</strong></td>
+      <td class="muted">${esc(p.role || '—')}</td>
+      <td class="muted">${esc(p.salary_type)}</td>
+      <td>${p.working_days}</td>
+      <td>${p.present_days}</td>
+      <td>${p.absences}</td>
+      <td>${fmtMoney(p.monthly_salary)}</td>
+      <td><strong>${fmtMoney(p.net_pay)}</strong></td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="viewPayslip(${p.id})">PAYSLIP</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePayslip(${p.id}, '${esc(p.name)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : `<tr><td colspan="9"><div class="empty-state"><span class="es-icon">☰</span>No payslips for ${esc(month)}. Mark attendance then GENERATE.</div></td></tr>`;
+}
+
+async function generatePayroll() {
+  const month = document.getElementById('payrollMonth').value || todayStr().slice(0, 7);
+  try {
+    const res = await api('/api/admin/payroll/generate', { method: 'POST', body: { month } });
+    toast(`Generated ${res.slips.length} payslip(s) for ${month}`);
+    loadPayslips();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function viewPayslip(id) {
+  const p = await api('/api/admin/payroll/' + id);
+  const nameParts = (p.name || 'Staff Member').split(' ');
+  showModal('Payslip — ' + p.name, `
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> Computing</div>
+        <div class="sheet-org">School of Computer Science &amp; Technology</div>
+        <div class="sheet-addr">Plot 14, Sector 7, New Mumbai &ndash; 400 710</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">SALARY SLIP — ${esc(p.month)}</div>
+      </div>
+      <table class="sheet-table">
+        <tr><th>Employee</th><td><strong>${esc(p.name)}</strong> (${esc(p.role || '—')})</td></tr>
+        <tr><th>Working Days</th><td>${p.working_days}</td></tr>
+        <tr><th>Days Present</th><td>${p.present_days} ${p.half_days ? `(incl. ${p.half_days} half-day)` : ''}</td></tr>
+        <tr><th>Absences</th><td>${p.absences}</td></tr>
+        <tr><th>Monthly Salary</th><td>${fmtMoney(p.monthly_salary)}</td></tr>
+        <tr><th>Gross Pay</th><td class="sheet-amount">${fmtMoney(p.gross_pay)}</td></tr>
+        <tr><th>Net Pay (Amount In Words)</th><td>${esc(toIndianWords(p.gross_pay))}</td></tr>
+      </table>
+      <div class="sheet-foot">
+        <div class="sheet-sign">Authorized Signatory</div>
+        <div class="sheet-note">This is a computer generated payslip.<br>Paid by VUMCA hITECH Computing.</div>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+      <button class="btn btn-purple" onclick="window.print()">PRINT</button>
+    </div>
+  `);
+}
+
+async function deletePayslip(id, name) {
+  if (!confirm(`Delete payslip for ${name}?`)) return;
+  try {
+    await api('/api/admin/payroll/' + id, { method: 'DELETE' });
+    toast('Payslip deleted');
+    loadPayslips();
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1682,6 +1996,8 @@ async function loadPayments() {
 }
 
 function openPaymentModal() {
+  const preselect = window._payForStudent;
+  window._payForStudent = null;
   showModal('Record Payment', `
     <form id="paymentForm">
       <div class="form-grid">
@@ -1689,7 +2005,7 @@ function openPaymentModal() {
           <label>Student</label>
           <select name="student_id" required>
             <option value="">Select student...</option>
-            ${(window._students || []).map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})</option>`).join('')}
+            ${(window._students || []).map(s => `<option value="${s.id}" ${preselect == s.id ? 'selected' : ''}>${esc(s.name)} (${esc(s.username)}) — due ${fmtMoney(s.pending || 0)}</option>`).join('')}
           </select>
         </div>
         <div class="field">
@@ -1798,6 +2114,9 @@ async function viewGstInvoice(id) {
         <tbody>${itemRows}</tbody>
       </table>
       <table class="sheet-table" style="margin-top:10px">
+        ${d.discount && d.discount.amount > 0 ? `
+        <tr><th>Concession Applied</th><td class="sheet-muted">${esc(d.discount.label || '')} — waived <strong>${fmtMoney(d.discount.amount)}</strong></td></tr>
+        ` : ''}
         <tr><th>Taxable Value</th><td>${fmtMoney(t.taxable)}</td></tr>
         <tr><th>CGST @ ${(t.rate / 2).toFixed(1)}%</th><td>${fmtMoney(t.cgst)}</td></tr>
         <tr><th>SGST @ ${(t.rate / 2).toFixed(1)}%</th><td>${fmtMoney(t.sgst)}</td></tr>

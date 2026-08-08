@@ -49,14 +49,30 @@ Additional demo accounts: students STU002–STU007 (password `student123` /
   (plus an online question-paper builder), payments & receipts with **GST tax
   invoices**, expense tracking, SMS/WhatsApp reminders, and a report builder (CSV
   export)
+- **Enquiry & lead management** — capture walk-in/website/referral leads with the
+  course of interest and source; a status funnel (New → Contacted → Follow-up →
+  Enrolled → Lost) with follow-up dates and one-click status changes; leads feed a
+  dedicated report and the dashboard shows open-enquiry counts
+- **Staff attendance & payroll** — mark daily attendance per staff member
+  (present / half-day / absent / leave), then auto-generate monthly payslips: monthly
+  salaries are prorated per working day, daily-paid staff are paid per present day,
+  and each slip prints on A4; a payroll report aggregates gross pay by month
+- **Discounts & concessions** — per-student concession as a percentage or fixed
+  amount. It lowers the net fee, shows as a badge in student records, is waived on
+  GST invoices, and is broken out in the fee collection report
+- **Installment plans & due dates** — set 1–12 installments per student; the app
+  builds a due-date schedule, auto-marks installments paid as payments arrive
+  (oldest due first), flags overdue installments, and shows the next due date in
+  student/parent portals and reminders
 - **Multi-branch support** — create multiple branches/centers with their own GSTIN
   and GST rate; a branch switcher in the admin top bar filters students, courses,
   batches, faculty, staff, exams, payments, expenses and reports to the active branch
 - **GST tax invoices** — any recorded payment can be printed as an A4 tax invoice
   with the branch GSTIN, HSN, taxable value and CGST/SGST split at the branch's GST
-  rate
+  rate; concessions applied to the student are shown as waived on the invoice
 - **Income & expense reports** — monthly income (fees collected) vs expenses with net
-  income, plus dedicated staff and expense reports, all scoped to the active branch
+  income, plus dedicated staff, expense, payroll and enquiry reports, all scoped to
+  the active branch
 - **AI quiz generation** — generate multiple-choice quiz questions from a topic
   using an OpenAI-compatible LLM API
 - **Online exams** — admins build a timed MCQ question paper per exam; students take

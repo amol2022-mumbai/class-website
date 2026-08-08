@@ -25,6 +25,7 @@
       <nav class="side-nav" id="sideNav">
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
         <button class="nav-item" data-tab="branches"><span class="nav-icon">◈</span> Branches</button>
+        <button class="nav-item" data-tab="enquiries"><span class="nav-icon">⚑</span> Enquiries</button>
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> Courses</button>
         <button class="nav-item" data-tab="enrollments"><span class="nav-icon">⇄</span> Enrollments</button>
@@ -36,6 +37,8 @@
         <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
         <button class="nav-item" data-tab="exams"><span class="nav-icon">▤</span> Exams & Results</button>
         <button class="nav-item" data-tab="payments"><span class="nav-icon">₿</span> Payments</button>
+        <button class="nav-item" data-tab="fees"><span class="nav-icon">≋</span> Fees & Installments</button>
+        <button class="nav-item" data-tab="payroll"><span class="nav-icon">☰</span> Payroll & Attendance</button>
         <button class="nav-item" data-tab="expenses"><span class="nav-icon">◍</span> Expenses</button>
         <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
         <button class="nav-item" data-tab="notifications"><span class="nav-icon">✉</span> Reminders</button>
@@ -100,6 +103,24 @@
         </div>
       </section>
 
+      <!-- Enquiries / Leads -->
+      <section id="tab-enquiries" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Enquiries &amp; Leads</h2>
+            <button class="btn btn-purple btn-small" onclick="openEnquiryModal()">+ ADD ENQUIRY</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Contact</th><th>Course</th><th>Source</th><th>Status</th><th>Follow-up</th><th>Created</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="enquiryRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Students -->
       <section id="tab-students" class="tab-panel hidden">
         <div class="panel">
@@ -111,7 +132,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Fee</th><th>Courses</th><th>Present Days</th><th>Actions</th>
+                  <th>ID</th><th>Name</th><th>Email</th><th>Mobile</th><th>Fee</th><th>Concession</th><th>Pending</th><th>Courses</th><th>Present Days</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody id="studentRows"></tbody>
@@ -360,6 +381,60 @@
         </div>
       </section>
 
+      <!-- Fees & Installments -->
+      <section id="tab-fees" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Fees &amp; Installment Plans</h2>
+            <button class="btn btn-ghost btn-small" onclick="loadFeesPlan()">REFRESH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Student</th><th>Total Fee</th><th>Concession</th><th>Net Fee</th><th>Paid</th><th>Pending</th><th>Installments</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="feesPlanRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Payroll & Staff Attendance -->
+      <section id="tab-payroll" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Staff Attendance</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <input type="date" id="staffAttDate" value="">
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadStaffAttendance()">LOAD</button>
+            </div>
+          </div>
+          <div id="staffAttendanceView"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Monthly Payroll</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <input type="month" id="payrollMonth" value="">
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadPayslips()">VIEW</button>
+              <button class="btn btn-ghost btn-small" onclick="generatePayroll()">GENERATE FOR MONTH</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Staff</th><th>Role</th><th>Type</th><th>Working Days</th><th>Present</th><th>Absences</th><th>Monthly Salary</th><th>Gross Pay</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="payslipRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Expenses -->
       <section id="tab-expenses" class="tab-panel hidden">
         <div class="panel">
@@ -485,6 +560,8 @@
                   <option value="income">Income &amp; Expense</option>
                   <option value="staff">Staff</option>
                   <option value="expenses">Expenses</option>
+                  <option value="payroll">Payroll</option>
+                  <option value="enquiries">Enquiries / Leads</option>
                 </select>
               </div>
               <button class="btn btn-purple btn-small" onclick="loadReports()">GENERATE</button>

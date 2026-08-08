@@ -169,6 +169,19 @@
         <div class="stat-grid" id="feeStatGrid"></div>
         <div class="panel">
           <div class="panel-header">
+            <h2>Fee Installment Schedule</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Installment</th><th>Due Date</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th></tr>
+              </thead>
+              <tbody id="installmentRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
             <h2>Payment History</h2>
             <button class="btn btn-purple" id="payOnlineBtn" onclick="payOnline(currentUser && currentUser.id)" style="display:none">PAY ONLINE (UPI/CARD)</button>
           </div>

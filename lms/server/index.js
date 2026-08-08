@@ -5,6 +5,8 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 const razorpay = require('./razorpay');
+const finance = require('./finance');
+const payroll = require('./payroll');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -118,7 +120,14 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
     JOIN courses c ON c.id = a.course_id
     WHERE a.date = ? AND a.status = 'present' AND ${cw}
   `).get(today, ...params).c;
-  res.json({ students, courses, assignments, quizzes, enrollments, submissions, presentToday });
+  const enquiries = db.prepare(`SELECT COUNT(*) AS c FROM enquiries e WHERE e.branch_id = ?`).get(bid).c;
+  const openEnquiries = db.prepare(`SELECT COUNT(*) AS c FROM enquiries e WHERE e.branch_id = ? AND e.status NOT IN ('enrolled','lost')`).get(bid).c;
+  const overdueFees = db.prepare(`
+    SELECT COUNT(*) AS c FROM installments i
+    JOIN users u ON u.id = i.student_id
+    WHERE i.paid_amount < i.amount AND i.due_date < ? AND ${bw}
+  `).get(today, ...(bid ? [bid] : [])).c;
+  res.json({ students, courses, assignments, quizzes, enrollments, submissions, presentToday, enquiries, openEnquiries, overdueFees });
 });
 
 // ---------- Admin: branches ----------
@@ -269,23 +278,133 @@ app.delete('/api/admin/expenses/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Admin: enquiries / leads ----------
+app.get('/api/admin/enquiries', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT e.*, c.code AS course_code, c.title AS course_title, b.name AS branch_name
+    FROM enquiries e
+    LEFT JOIN courses c ON c.id = e.course_id
+    LEFT JOIN branches b ON b.id = e.branch_id
+    WHERE ${branchWhere('e', bid)}
+    ORDER BY CASE e.status WHEN 'new' THEN 0 WHEN 'follow-up' THEN 1 WHEN 'contacted' THEN 2 WHEN 'enrolled' THEN 3 ELSE 4 END, e.created_at DESC
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/enquiries', requireAdmin, (req, res) => {
+  const { name, phone, email, course_id, source, status, notes, followup_date } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  const result = db.prepare(
+    'INSERT INTO enquiries (branch_id, name, phone, email, course_id, source, status, notes, followup_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), name, phone || null, email || null, course_id || null,
+        source || 'Walk-in', status || 'new', notes || null, followup_date || null);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/enquiries/:id', requireAdmin, (req, res) => {
+  const enquiry = db.prepare('SELECT * FROM enquiries WHERE id = ?').get(req.params.id);
+  if (!enquiry) return res.status(404).json({ error: 'Enquiry not found' });
+  const { name, phone, email, course_id, source, status, notes, followup_date } = req.body || {};
+  db.prepare(`
+    UPDATE enquiries SET name = ?, phone = ?, email = ?, course_id = ?, source = ?, status = ?, notes = ?, followup_date = ?
+    WHERE id = ?
+  `).run(
+    name ?? enquiry.name, phone !== undefined ? phone : enquiry.phone,
+    email !== undefined ? email : enquiry.email,
+    course_id !== undefined ? course_id : enquiry.course_id,
+    source ?? enquiry.source, status ?? enquiry.status,
+    notes !== undefined ? notes : enquiry.notes,
+    followup_date !== undefined ? followup_date : enquiry.followup_date,
+    enquiry.id
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/enquiries/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM enquiries WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Enquiry not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Admin: staff attendance ----------
+app.get('/api/admin/staff/attendance', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const date = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const staff = db.prepare(`
+    SELECT s.*, a.status AS att_status
+    FROM staff s
+    LEFT JOIN staff_attendance a ON a.staff_id = s.id AND a.date = ?
+    WHERE s.status = 'active' AND ${branchWhere('s', bid)}
+    ORDER BY s.name
+  `).all(date, ...(bid ? [bid] : []));
+  res.json({ date, staff });
+});
+
+app.post('/api/admin/staff/attendance', requireAdmin, (req, res) => {
+  const { staff_id, date, status } = req.body || {};
+  if (!staff_id || !date || !status) return res.status(400).json({ error: 'Staff, date and status are required' });
+  if (!['present', 'absent', 'half-day', 'leave'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  db.prepare(`
+    INSERT INTO staff_attendance (staff_id, date, status) VALUES (?, ?, ?)
+    ON CONFLICT(staff_id, date) DO UPDATE SET status = excluded.status
+  `).run(staff_id, date, status);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: payroll & payslips ----------
+app.get('/api/admin/payroll', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const slips = payroll.payslipsForMonth(bid, month);
+  res.json({ month, working_days: payroll.workingDaysInMonth(month), slips });
+});
+
+app.post('/api/admin/payroll/generate', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const month = (req.body || {}).month || new Date().toISOString().slice(0, 7);
+  const result = payroll.generatePayroll(bid, month);
+  res.status(201).json(result);
+});
+
+app.get('/api/admin/payroll/:id', requireAdmin, (req, res) => {
+  const p = db.prepare(`
+    SELECT ps.*, s.name, s.role, s.phone FROM payslips ps JOIN staff s ON s.id = ps.staff_id WHERE ps.id = ?
+  `).get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Payslip not found' });
+  res.json(p);
+});
+
+app.delete('/api/admin/payroll/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM payslips WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- Admin: students ----------
 app.get('/api/admin/students', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   const students = db.prepare(`
     SELECT u.id, u.username, u.name, u.email, u.mobile, u.fee_amount, u.fee_paid, u.branch_id,
+           u.discount_type, u.discount_value, u.fee_installments, u.fee_start_date,
            b.name AS branch_name,
            (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) AS course_count,
-           (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days
+           (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days,
+           (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.student_id = u.id) AS paid
     FROM users u LEFT JOIN branches b ON b.id = u.branch_id
     WHERE u.role = 'student' AND ${branchWhere('u', bid)}
     ORDER BY u.name
   `).all(...(bid ? [bid] : []));
-  res.json(students);
+  res.json(students.map(s => ({
+    ...s,
+    effective_fee: finance.effectiveFee(s),
+    discount_amount: finance.discountAmount(s),
+    pending: finance.pendingAmount(s.id),
+  })));
 });
 
 app.post('/api/admin/students', requireAdmin, (req, res) => {
-  const { username, password, name, email, mobile, fee_amount, fee_paid } = req.body || {};
+  const { username, password, name, email, mobile, fee_amount, fee_paid, discount_type, discount_value, fee_installments, fee_start_date } = req.body || {};
   if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
     return res.status(409).json({ error: 'Username already exists' });
@@ -293,15 +412,20 @@ app.post('/api/admin/students', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   const hash = bcrypt.hashSync(password, 10);
   const result = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id, discount_type, discount_value, fee_installments, fee_start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run('student', username, hash, name, email || null, mobile || null,
         fee_amount != null ? Number(fee_amount) : 0,
-        fee_paid ? 1 : 0, bid);
+        fee_paid ? 1 : 0, bid,
+        discount_type || 'none', Number(discount_value) || 0,
+        Number(fee_installments) > 1 ? Number(fee_installments) : 1,
+        fee_start_date || null);
+  finance.ensureInstallments(result.lastInsertRowid);
+  finance.refreshFeeStatus(result.lastInsertRowid);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
-  const { name, email, mobile, fee_amount, fee_paid, password } = req.body || {};
+  const { name, email, mobile, fee_amount, fee_paid, password, discount_type, discount_value, fee_installments, fee_start_date } = req.body || {};
   const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
   const fields = {
@@ -310,14 +434,21 @@ app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
     mobile: mobile ?? student.mobile,
     fee_amount: fee_amount != null ? Number(fee_amount) : student.fee_amount,
     fee_paid: fee_paid != null ? (fee_paid ? 1 : 0) : student.fee_paid,
+    discount_type: discount_type != null ? (discount_type || 'none') : student.discount_type,
+    discount_value: discount_value != null ? Number(discount_value) : student.discount_value,
+    fee_installments: fee_installments != null ? (Number(fee_installments) > 1 ? Number(fee_installments) : 1) : student.fee_installments,
+    fee_start_date: fee_start_date !== undefined ? (fee_start_date || null) : student.fee_start_date,
   };
+  const update = 'UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ?, discount_type = ?, discount_value = ?, fee_installments = ?, fee_start_date = ?';
   if (password) {
-    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ?, password_hash = ? WHERE id = ?')
-      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, bcrypt.hashSync(password, 10), student.id);
+    db.prepare(update + ', password_hash = ? WHERE id = ?')
+      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, fields.discount_type, fields.discount_value, fields.fee_installments, fields.fee_start_date, bcrypt.hashSync(password, 10), student.id);
   } else {
-    db.prepare('UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ? WHERE id = ?')
-      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, student.id);
+    db.prepare(update + ' WHERE id = ?')
+      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, fields.discount_type, fields.discount_value, fields.fee_installments, fields.fee_start_date, student.id);
   }
+  finance.ensureInstallments(student.id);
+  finance.refreshFeeStatus(student.id);
   res.json({ ok: true });
 });
 
@@ -325,6 +456,14 @@ app.delete('/api/admin/students/:id', requireAdmin, (req, res) => {
   const result = db.prepare("DELETE FROM users WHERE id = ? AND role = 'student'").run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Student not found' });
   res.json({ ok: true });
+});
+
+app.get('/api/admin/students/:id/plan', requireAdmin, (req, res) => {
+  const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  const snap = finance.feeSnapshot(student.id);
+  const payments = db.prepare('SELECT * FROM payments WHERE student_id = ? ORDER BY paid_at DESC').all(student.id);
+  res.json({ ...snap, payments });
 });
 
 // ---------- Admin: courses ----------
@@ -963,11 +1102,8 @@ app.post('/api/admin/payments', requireAdmin, (req, res) => {
   const result = db.prepare(
     'INSERT INTO payments (student_id, amount, method, receipt_no, note, branch_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, datetime(\'now\'))'
   ).run(student_id, Number(amount), method || 'cash', receiptNo, note || null, student.branch_id || activeBranch(req));
-  // Auto-mark fee paid when this payment clears the fee amount.
-  const totalPaid = db.prepare('SELECT COALESCE(SUM(amount),0) AS t FROM payments WHERE student_id = ?').get(student_id).t;
-  if (totalPaid >= (student.fee_amount || 0)) {
-    db.prepare('UPDATE users SET fee_paid = 1 WHERE id = ?').run(student_id);
-  }
+  finance.ensureInstallments(student_id);
+  finance.allocatePayment(student_id, Number(amount));
   res.status(201).json({ id: result.lastInsertRowid, receipt_no: receiptNo });
 });
 
@@ -1004,6 +1140,14 @@ app.get('/api/admin/payments/:id/invoice', requireAdmin, (req, res) => {
   const cgst = Math.round((gst / 2) * 100) / 100;
   const sgst = Math.round((gst - cgst) * 100) / 100;
 
+  const studentRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payment.student_id);
+  const discount = {
+    type: studentRow.discount_type || 'none',
+    value: Number(studentRow.discount_value) || 0,
+    amount: finance.discountAmount(studentRow),
+    label: finance.discountLabel(studentRow),
+  };
+
   const year = (payment.paid_at || new Date().toISOString()).slice(0, 4);
   const invoiceNo = 'GST-' + (branch.code || 'BR') + '-' + year + '-' + String(payment.id).padStart(4, '0');
 
@@ -1013,12 +1157,16 @@ app.get('/api/admin/payments/:id/invoice', requireAdmin, (req, res) => {
     student: { username: payment.username, name: payment.student_name, email: payment.email, mobile: payment.mobile },
     branch: { name: branch.name, code: branch.code, address: branch.address, phone: branch.phone, email: branch.email, gstin: branch.gstin, gst_rate: rate },
     items: courses,
+    discount,
     tax: { rate, taxable, gst, cgst, sgst, total },
   });
 });
 
 app.delete('/api/admin/payments/:id', requireAdmin, (req, res) => {
+  const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(req.params.id);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
   db.prepare('DELETE FROM payments WHERE id = ?').run(req.params.id);
+  finance.recomputeInstallments(payment.student_id);
   res.json({ ok: true });
 });
 
@@ -1225,8 +1373,15 @@ app.post('/api/admin/notifications/send-all', requireAdmin, async (req, res) => 
 function defaultReminder(student, purpose) {
   const name = student.name.split(' ')[0];
   if (purpose === 'fee') {
-    const status = student.fee_paid ? 'your fee has been cleared' : `your fee of Rs. ${student.fee_amount || 0} is still pending`;
-    return `Hi ${name}, ${status}. Please contact the office. - VUMCA hITECH Computing`;
+    const snap = finance.feeSnapshot(student.id);
+    if (snap && snap.pending > 0) {
+      let due = '';
+      if (snap.next_due && snap.next_due.due_date) {
+        due = ` Next installment "${snap.next_due.label}" of Rs. ${snap.next_due.amount} is due on ${snap.next_due.due_date}.`;
+      }
+      return `Hi ${name}, your fee balance is Rs. ${snap.pending}.${due} Please contact the office. - VUMCA hITECH Computing`;
+    }
+    return `Hi ${name}, your fee has been cleared. - VUMCA hITECH Computing`;
   }
   if (purpose === 'class') {
     return `Hi ${name}, reminder: your computer class is scheduled for tomorrow. Be on time! - VUMCA hITECH Computing`;
@@ -1305,18 +1460,11 @@ app.post('/api/student/exams/:id/submit', requireStudent, (req, res) => {
 });
 
 app.get('/api/student/fees', requireStudent, (req, res) => {
-  const student = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.user.id);
+  const snap = finance.feeSnapshot(req.session.user.id);
   const payments = db.prepare(`
     SELECT p.* FROM payments p WHERE p.student_id = ? ORDER BY p.paid_at DESC
   `).all(req.session.user.id);
-  const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  res.json({
-    fee_amount: student.fee_amount || 0,
-    fee_paid: student.fee_paid,
-    total_paid: totalPaid,
-    pending: Math.max(0, (student.fee_amount || 0) - totalPaid),
-    payments,
-  });
+  res.json({ ...snap, payments });
 });
 
 app.get('/api/student/certificates', requireStudent, (req, res) => {
@@ -1443,7 +1591,6 @@ app.get('/api/parent/children/:id/dashboard', requireParent, (req, res) => {
     JOIN courses c ON c.id = a.course_id WHERE a.student_id = ? ORDER BY a.date DESC
   `).all(childId);
   const payments = db.prepare('SELECT * FROM payments WHERE student_id = ? ORDER BY paid_at DESC').all(childId);
-  const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const examResults = db.prepare(`
     SELECT x.title, x.max_marks, r.marks, c.code AS course_code
     FROM exam_results r
@@ -1461,7 +1608,7 @@ app.get('/api/parent/children/:id/dashboard', requireParent, (req, res) => {
     courses,
     attendance,
     attendanceSummary: { present, late, absent: totalDays - present - late, total: totalDays },
-    fee: { fee_amount: student.fee_amount, fee_paid: student.fee_paid, total_paid: totalPaid, pending: Math.max(0, (student.fee_amount || 0) - totalPaid) },
+    fee: finance.feeSnapshot(childId),
     payments,
     examResults,
   });
@@ -1498,8 +1645,7 @@ app.post('/api/payment/order', requirePayer, async (req, res) => {
     const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(studentId);
     if (!student) return res.status(404).json({ error: 'Student not found' });
     if (!payerCanAccess(req, studentId)) return res.status(403).json({ error: 'Not linked to this student' });
-    const paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE student_id = ?').get(studentId).t;
-    const pending = Math.max(0, (student.fee_amount || 0) - paid);
+    const pending = finance.pendingAmount(studentId);
     if (pending <= 0) return res.status(400).json({ error: 'No pending dues to pay' });
     const order = await razorpay.createOrder({ amountInRupees: pending, receipt: 'rcpt_' + Date.now() });
     res.json({ order_id: order.id, amount: pending, currency: 'INR', key_id: razorpay.getKeyId() });
@@ -1528,9 +1674,9 @@ app.post('/api/payment/verify', requirePayer, async (req, res) => {
     db.prepare(
       "INSERT INTO payments (student_id, amount, method, receipt_no, note, branch_id, paid_at) VALUES (?, ?, 'razorpay', ?, 'Online payment (Razorpay)', ?, datetime('now'))"
     ).run(studentId, amount, receiptNo, student.branch_id || activeBranch(req));
-    const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE student_id = ?').get(studentId).t;
-    const cleared = totalPaid >= (student.fee_amount || 0);
-    if (cleared) db.prepare('UPDATE users SET fee_paid = 1 WHERE id = ?').run(studentId);
+    finance.ensureInstallments(studentId);
+    finance.allocatePayment(studentId, amount);
+    const cleared = finance.pendingAmount(studentId) <= 0.005;
 
     let notifStatus = 'failed';
     try {

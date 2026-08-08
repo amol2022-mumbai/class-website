@@ -235,6 +235,54 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present', 'absent', 'late')),
     UNIQUE(student_id, course_id, date)
   );
+
+  CREATE TABLE IF NOT EXISTS enquiries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id),
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    course_id INTEGER REFERENCES courses(id),
+    source TEXT DEFAULT 'Walk-in',
+    status TEXT DEFAULT 'new',
+    notes TEXT,
+    followup_date TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS staff_attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present', 'absent', 'half-day', 'leave')),
+    UNIQUE(staff_id, date)
+  );
+
+  CREATE TABLE IF NOT EXISTS payslips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,
+    working_days INTEGER DEFAULT 0,
+    present_days REAL DEFAULT 0,
+    half_days REAL DEFAULT 0,
+    absences INTEGER DEFAULT 0,
+    salary_type TEXT DEFAULT 'monthly',
+    monthly_salary REAL DEFAULT 0,
+    gross_pay REAL DEFAULT 0,
+    net_pay REAL DEFAULT 0,
+    generated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(staff_id, month)
+  );
+
+  CREATE TABLE IF NOT EXISTS installments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT,
+    amount REAL NOT NULL,
+    due_date TEXT,
+    paid_amount REAL DEFAULT 0,
+    paid_at TEXT
+  );
 `);
 
 // Migrations for databases created by earlier versions of the app.
@@ -289,6 +337,10 @@ function migrate() {
     if (!cols.includes(def.split(' ')[0])) db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`);
   };
   addCol('users', 'branch_id INTEGER');
+  addCol('users', "discount_type TEXT DEFAULT 'none'");
+  addCol('users', 'discount_value REAL DEFAULT 0');
+  addCol('users', 'fee_installments INTEGER DEFAULT 1');
+  addCol('users', 'fee_start_date TEXT');
   addCol('courses', 'branch_id INTEGER');
   addCol('payments', 'branch_id INTEGER');
 }
@@ -623,6 +675,68 @@ function seedModules() {
     insertExpense.run(ebid, 'Electricity', 3200, 'Utility bill', formatFut(-15));
     insertExpense.run(ebid, 'Internet', 999, 'Broadband + backup line', formatFut(-12));
     insertExpense.run(ebid, 'Stationery', 1450, 'Printing and paper', formatFut(-9));
+  }
+
+  // ---- Enquiries / leads ----
+  if (count('enquiries') === 0) {
+    const insertEnquiry = db.prepare(
+      'INSERT INTO enquiries (branch_id, name, phone, email, course_id, source, status, notes, followup_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const nbid = defBranchId();
+    insertEnquiry.run(nbid, 'Rohan Kulkarni', '+91 98201 23456', 'rohan.k@example.com', courseIds[1], 'Website', 'follow-up', 'Interested in full-stack bootcamp, asked about EMI options.', formatFut(2), formatFut(-4));
+    insertEnquiry.run(nbid, 'Isha Verma', '+91 98202 34567', 'isha.v@example.com', courseIds[2], 'Referral', 'new', 'Wants AI/ML course, weekend batch.', formatFut(1), formatFut(-1));
+    insertEnquiry.run(nbid, 'Arjun Menon', '+91 98203 45678', 'arjun.m@example.com', courseIds[0], 'Walk-in', 'lost', 'Could not join, going abroad.', null, formatFut(-12));
+    insertEnquiry.run(nbid, 'Sneha Kulkarni', '+91 98204 56789', 'sneha.k@example.com', courseIds[4], 'Social Media', 'new', 'Asked about networking fundamentals duration.', formatFut(3), formatFut(-2));
+  }
+
+  // ---- Installment plans for demo students ----
+  const setPlan = db.prepare('UPDATE users SET fee_installments = ?, fee_start_date = ? WHERE username = ?');
+  const setDiscount = db.prepare("UPDATE users SET discount_type = ?, discount_value = ? WHERE username = ?");
+  setPlan.run(3, formatFut(-35), 'STU003');
+  setPlan.run(2, formatFut(-40), 'STU006');
+  setDiscount.run('percent', 10, 'STU004');
+  if (count('installments') === 0) {
+    const insertInstallment = db.prepare(
+      'INSERT INTO installments (student_id, label, amount, due_date) VALUES (?, ?, ?, ?)'
+    );
+    const makePlan = (username, label, per, startOffset) => {
+      const row = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+      if (!row) return;
+      for (let i = 0; i < label.length; i++) {
+        const due = new Date(today.getTime() + (startOffset + i * 30) * 86400000);
+        insertInstallment.run(row.id, label[i], per, formatDate(due));
+      }
+    };
+    makePlan('STU003', ['Admission Fee', 'Installment 2', 'Installment 3'], 500, -35);
+    makePlan('STU006', ['First Installment', 'Final Installment'], 500, -40);
+    // STU003 paid the admission fee (installment 1); the rest are overdue.
+    const stu3 = db.prepare("SELECT id FROM users WHERE username = 'STU003'").get();
+    if (stu3) {
+      db.prepare(
+        'INSERT INTO payments (student_id, amount, method, receipt_no, note, branch_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(stu3.id, 500, 'cash', 'RCP-2026-0010', 'Admission fee', defBranchId(), formatFut(-35) + ' 11:00:00');
+      db.prepare('UPDATE installments SET paid_amount = 500, paid_at = ? WHERE id = (SELECT id FROM installments WHERE student_id = ? ORDER BY due_date LIMIT 1)')
+        .run(formatFut(-35) + ' 11:00:00', stu3.id);
+    }
+  }
+
+  // ---- Staff attendance (current month, demo) ----
+  if (count('staff_attendance') === 0) {
+    const insertStaffAtt = db.prepare(
+      'INSERT OR IGNORE INTO staff_attendance (staff_id, date, status) VALUES (?, ?, ?)'
+    );
+    const staffIds = db.prepare('SELECT id FROM staff ORDER BY id').all().map(r => r.id);
+    const attStatusPool = ['present', 'present', 'present', 'present', 'half-day'];
+    for (const sid of staffIds) {
+      let added = 0;
+      for (let d = 3; d <= 18 && added < 6; d++) {
+        const date = new Date(today.getTime() - d * 86400000);
+        const day = date.getDay();
+        if (day === 0 || day === 6) continue;
+        insertStaffAtt.run(sid, formatDate(date), attStatusPool[Math.floor(Math.random() * attStatusPool.length)]);
+        added += 1;
+      }
+    }
   }
 }
 

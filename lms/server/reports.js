@@ -31,27 +31,86 @@ function studentsReport(bid) {
 }
 
 function feesReport(bid) {
+  const finance = require('./finance');
   const rows = db.prepare(`
-    SELECT u.username, u.name, u.fee_amount, u.fee_paid FROM users u
-    WHERE u.role = 'student' AND ${bw('u', bid)} ORDER BY u.name
+    SELECT u.id, u.username, u.name, u.fee_amount, u.fee_paid, u.discount_type, u.discount_value
+    FROM users u WHERE u.role = 'student' AND ${bw('u', bid)} ORDER BY u.name
   `).all(...args(bid));
-  const total = rows.reduce((s, r) => s + (r.fee_amount || 0), 0);
-  const collected = rows.filter(r => r.fee_paid).reduce((s, r) => s + (r.fee_amount || 0), 0);
-  const pending = total - collected;
+  const rowsWith = rows.map(r => ({
+    ...r,
+    effective: finance.effectiveFee(r),
+    discount: finance.discountAmount(r),
+    pending: finance.pendingAmount(r.id),
+  }));
+  const collected = rowsWith.reduce((s, r) => s + (r.effective - r.pending), 0);
+  const pending = rowsWith.reduce((s, r) => s + r.pending, 0);
+  const discountTotal = rowsWith.reduce((s, r) => s + r.discount, 0);
   return {
     title: 'Fee Collection Report',
     summary: [
-      { label: 'Total Fees', value: formatMoney(total) },
+      { label: 'Total Fee', value: formatMoney(rowsWith.reduce((s, r) => s + r.fee_amount, 0)) },
+      { label: 'Concessions', value: formatMoney(discountTotal) },
       { label: 'Collected', value: formatMoney(collected) },
       { label: 'Pending', value: formatMoney(pending) },
-      { label: 'Paid Students', value: rows.filter(r => r.fee_paid).length },
-      { label: 'Pending Students', value: rows.filter(r => !r.fee_paid).length },
+      { label: 'Paid Students', value: rowsWith.filter(r => r.pending <= 0).length },
+      { label: 'Pending Students', value: rowsWith.filter(r => r.pending > 0).length },
     ],
-    columns: ['Student ID', 'Name', 'Fee Amount', 'Status', 'Pending Amount'],
-    rows: rows.map(r => [
+    columns: ['Student ID', 'Name', 'Fee Amount', 'Concession', 'Net Fee', 'Status', 'Pending Amount'],
+    rows: rowsWith.map(r => [
       r.username, r.name, formatMoney(r.fee_amount),
-      r.fee_paid ? 'PAID' : 'PENDING',
-      r.fee_paid ? 0 : r.fee_amount,
+      r.discount ? formatMoney(r.discount) : '—',
+      formatMoney(r.effective),
+      r.pending <= 0 ? 'PAID' : 'PENDING',
+      formatMoney(r.pending),
+    ]),
+  };
+}
+
+function payrollReport(bid) {
+  const rows = db.prepare(`
+    SELECT ps.month, ps.salary_type, s.name, s.role, ps.working_days, ps.present_days, ps.absences,
+           ps.monthly_salary, ps.gross_pay
+    FROM payslips ps JOIN staff s ON s.id = ps.staff_id
+    WHERE ${bw('s', bid)}
+    ORDER BY ps.month DESC, s.name
+  `).all(...args(bid));
+  const totalGross = rows.reduce((s, r) => s + r.gross_pay, 0);
+  return {
+    title: 'Payroll Report',
+    summary: [
+      { label: 'Payslips', value: rows.length },
+      { label: 'Gross Payroll', value: formatMoney(totalGross) },
+      { label: 'Months', value: [...new Set(rows.map(r => r.month))].length },
+    ],
+    columns: ['Month', 'Staff', 'Role', 'Type', 'Working Days', 'Present', 'Absences', 'Monthly Salary', 'Gross Pay'],
+    rows: rows.map(r => [
+      r.month, r.name, r.role, r.salary_type, r.working_days, r.present_days, r.absences,
+      formatMoney(r.monthly_salary), formatMoney(r.gross_pay),
+    ]),
+  };
+}
+
+function enquiriesReport(bid) {
+  const rows = db.prepare(`
+    SELECT e.name, e.phone, e.email, e.source, e.status, e.followup_date, e.created_at, c.title AS course
+    FROM enquiries e LEFT JOIN courses c ON c.id = e.course_id
+    WHERE ${bw('e', bid)} ORDER BY e.created_at DESC
+  `).all(...args(bid));
+  const byStatus = {};
+  for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+  return {
+    title: 'Enquiry / Lead Report',
+    summary: [
+      { label: 'Total Leads', value: rows.length },
+      { label: 'New', value: byStatus['new'] || 0 },
+      { label: 'Follow-up', value: byStatus['follow-up'] || 0 },
+      { label: 'Enrolled', value: byStatus['enrolled'] || 0 },
+      { label: 'Lost', value: byStatus['lost'] || 0 },
+    ],
+    columns: ['Name', 'Phone', 'Email', 'Course', 'Source', 'Status', 'Follow-up', 'Created'],
+    rows: rows.map(r => [
+      r.name, r.phone || '—', r.email || '—', r.course || '—', r.source || '—',
+      r.status, r.followup_date || '—', (r.created_at || '—').slice(0, 10),
     ]),
   };
 }
@@ -283,6 +342,8 @@ const builders = {
   income: incomeReport,
   staff: staffReport,
   expenses: expensesReport,
+  payroll: payrollReport,
+  enquiries: enquiriesReport,
 };
 
 module.exports = { builders, formatMoney };

@@ -228,8 +228,14 @@ function cancelExam() {
 
 async function loadFees() {
   const d = await api('/api/student/fees');
+  const overdueBanner = d.overdue_count > 0 ? `
+    <div class="alert alert-error" style="margin-bottom:14px">
+      <strong>${d.overdue_count} installment(s) overdue</strong> — ${fmtMoney(d.overdue_amount)} past due.
+      Please clear them at the office or online at the earliest.
+    </div>` : '';
+  document.getElementById('feeStatGrid').insertAdjacentHTML('beforebegin', overdueBanner);
   document.getElementById('feeStatGrid').innerHTML = `
-    <div class="stat-card purple"><div class="stat-num">${fmtMoney(d.fee_amount)}</div><div class="stat-label">Total Fee</div></div>
+    <div class="stat-card purple"><div class="stat-num">${fmtMoney(d.effective_fee)}</div><div class="stat-label">Net Fee${d.discount_amount > 0 ? ` <small>(${esc(d.discount_label || 'concession')})</small>` : ''}</div></div>
     <div class="stat-card green"><div class="stat-num">${fmtMoney(d.total_paid)}</div><div class="stat-label">Paid</div></div>
     <div class="stat-card ${d.pending > 0 ? 'red' : 'green'}"><div class="stat-num">${fmtMoney(d.pending)}</div><div class="stat-label">Pending</div></div>
     <div class="stat-card"><div class="stat-num">${d.fee_paid ? 'PAID' : 'PENDING'}</div><div class="stat-label">Status</div></div>
@@ -242,6 +248,18 @@ async function loadFees() {
       if (cfg.enabled && d.pending > 0) btn.textContent = `PAY ${fmtMoney(d.pending)} ONLINE (UPI/CARD)`;
     } catch (_) { btn.style.display = 'none'; }
   }
+  const statusBadge = { paid: 'badge-green', overdue: 'badge-red', pending: 'badge-yellow' };
+  document.getElementById('installmentRows').innerHTML = (d.installments && d.installments.length)
+    ? d.installments.map(i => `
+      <tr>
+        <td><strong>${esc(i.label)}</strong></td>
+        <td class="muted">${esc(i.due_date || '—')}</td>
+        <td>${fmtMoney(i.amount)}</td>
+        <td>${fmtMoney(i.paid_amount)}</td>
+        <td>${i.outstanding > 0 ? `<strong style="color:var(--red)">${fmtMoney(i.outstanding)}</strong>` : fmtMoney(0)}</td>
+        <td><span class="badge ${statusBadge[i.status] || 'badge-yellow'}">${esc(i.status)}</span></td>
+      </tr>`).join('')
+    : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">≋</span>No installment plan — fee is a single payment.</div></td></tr>';
   document.getElementById('paymentRows').innerHTML = d.payments.length ? d.payments.map(p => `
     <tr>
       <td><span class="badge badge-cyan">${esc(p.receipt_no)}</span></td>
