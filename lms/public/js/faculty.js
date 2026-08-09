@@ -9,6 +9,7 @@ const tabTitles = {
   students: ['// FACULTY / STUDENTS', 'Student Roster'],
   attendance: ['// FACULTY / ATTENDANCE', 'Attendance Tracker'],
   assignments: ['// FACULTY / GRADING', 'Assignment Grading'],
+  leaves: ['// FACULTY / LEAVE', 'Leave Management'],
 };
 
 (async function init() {
@@ -25,6 +26,10 @@ const tabTitles = {
   document.getElementById('rosterCourse').addEventListener('change', () => loadRoster());
   document.getElementById('attCourse').addEventListener('change', () => loadAttendance());
   document.getElementById('attDate').addEventListener('change', () => loadAttendance());
+  document.getElementById('leaveForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    applyLeave(new FormData(ev.target));
+  });
 
   switchTab('dashboard');
 })();
@@ -44,6 +49,7 @@ function switchTab(tab) {
   else if (tab === 'students') loadRoster();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'assignments') loadAssignments();
+  else if (tab === 'leaves') loadLeaves();
 }
 
 async function loadCourses() {
@@ -251,6 +257,43 @@ async function gradeSubmission(sid) {
     });
     toast('Grade saved');
     showSubmissions(gradingAssignmentId, document.getElementById('submissionsTitle').textContent.replace('Submissions — ', ''));
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Leave management ----------
+async function loadLeaves() {
+  try {
+    const leaves = await api('/api/faculty/leaves');
+    document.getElementById('leaveRows').innerHTML = leaves.length ? leaves.map(l => `
+      <tr>
+        <td><span class="badge badge-purple">${esc(l.leave_type)}</span></td>
+        <td class="muted">${esc(l.reason || '—')}</td>
+        <td class="muted">${esc(l.start_date)}</td>
+        <td class="muted">${esc(l.end_date)}</td>
+        <td>${l.days}</td>
+        <td><span class="badge ${l.status === 'approved' ? 'badge-green' : l.status === 'rejected' ? 'badge-red' : 'badge-yellow'}">${esc(l.status.toUpperCase())}</span></td>
+        <td class="muted">${esc(l.reviewed_by || '—')}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">☍</span>No leave applications yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+async function applyLeave(f) {
+  const start_date = f.get('start_date');
+  const end_date = f.get('end_date');
+  if (!start_date || !end_date) return toast('Select both start and end dates', true);
+  if (start_date > end_date) return toast('Start date must be before end date', true);
+  const body = {
+    leave_type: f.get('leave_type'),
+    reason: f.get('reason'),
+    start_date,
+    end_date,
+  };
+  try {
+    await api('/api/faculty/leaves', { method: 'POST', body });
+    toast('Leave application submitted for admin approval');
+    document.getElementById('leaveForm').reset();
+    loadLeaves();
   } catch (err) { toast(err.message, true); }
 }
 

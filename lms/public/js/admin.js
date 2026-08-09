@@ -31,6 +31,10 @@ const tabTitles = {
   backup: ['// ADMIN / BACKUP', 'Backup & Restore'],
   attendance: ['// ADMIN / ATTENDANCE', 'Attendance Tracker'],
   reports: ['// ADMIN / REPORTS', 'Report Builder'],
+  library: ['// ADMIN / LIBRARY', 'Library Management'],
+  transport: ['// ADMIN / TRANSPORT', 'Transport Routes'],
+  broadcasts: ['// ADMIN / BROADCASTS', 'Bulk Broadcasts'],
+  leaves: ['// ADMIN / LEAVES', 'Leave Management'],
 };
 
 (async function init() {
@@ -133,6 +137,10 @@ function switchTab(tab) {
   else if (tab === 'backup') clearBackupHint();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'reports') loadReports();
+  else if (tab === 'library') { loadBooks(); loadLoans(); }
+  else if (tab === 'transport') { loadRoutes(); loadRouteSelect(); }
+  else if (tab === 'broadcasts') { loadBroadcasts(); loadBroadcastConfig(); }
+  else if (tab === 'leaves') { loadLeaves(); loadLeaveCalendar(); }
 }
 
 // ---------- Branches ----------
@@ -3032,4 +3040,477 @@ function showModal(title, bodyHtml) {
 function closeModal() {
   document.getElementById('modalOverlay').classList.add('hidden');
   document.getElementById('modalBody').innerHTML = '';
+}
+
+// ---------- Library ----------
+async function loadBooks() {
+  const books = await api('/api/admin/books');
+  window._books = books;
+  document.getElementById('bookRows').innerHTML = books.length ? books.map(b => `
+    <tr>
+      <td><strong>${esc(b.title)}</strong></td>
+      <td class="muted">${esc(b.author || '—')}</td>
+      <td class="muted">${esc(b.isbn || '—')}</td>
+      <td><span class="badge badge-purple">${esc(b.category || 'General')}</span></td>
+      <td>${b.quantity}</td>
+      <td><span class="badge ${b.available > 0 ? 'badge-green' : 'badge-red'}">${b.available}</span></td>
+      <td>${b.issued_count}</td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openBookModal(${b.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBook(${b.id}, '${esc(b.title)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">▤</span>No books in the catalog yet.</div></td></tr>';
+}
+
+function openBookModal(id) {
+  const b = (window._books || []).find(x => x.id === id) || {};
+  showModal(b.id ? 'Edit Book' : 'Add Book', `
+    <form id="bookForm">
+      <div class="form-grid">
+        <div class="field span-2"><label>Title *</label><input name="title" required value="${esc(b.title || '')}" placeholder="e.g. Python Crash Course"></div>
+        <div class="field"><label>Author</label><input name="author" value="${esc(b.author || '')}" placeholder="e.g. Eric Matthes"></div>
+        <div class="field"><label>ISBN</label><input name="isbn" value="${esc(b.isbn || '')}"></div>
+        <div class="field"><label>Category</label>
+          <select name="category">
+            ${['Programming', 'Web Development', 'AI / ML', 'Databases', 'Networking', 'Computer Science', 'General'].map(c =>
+              `<option value="${c}" ${(b.category || 'General') === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Copies</label><input type="number" name="quantity" min="1" value="${b.quantity || 1}"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${b.id ? 'SAVE CHANGES' : 'ADD BOOK'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('bookForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = { title: f.get('title'), author: f.get('author'), isbn: f.get('isbn'), category: f.get('category'), quantity: Number(f.get('quantity')) };
+    try {
+      if (b.id) await api('/api/admin/books/' + b.id, { method: 'PUT', body });
+      else await api('/api/admin/books', { method: 'POST', body });
+      toast(b.id ? 'Book updated' : 'Book added');
+      closeModal(); loadBooks();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteBook(id, title) {
+  if (!confirm(`Delete "${title}" from the catalog?`)) return;
+  try {
+    await api('/api/admin/books/' + id, { method: 'DELETE' });
+    toast('Book deleted'); loadBooks();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadLoans() {
+  const loans = await api('/api/admin/library/loans');
+  document.getElementById('loanRows').innerHTML = loans.length ? loans.map(l => `
+    <tr>
+      <td><strong>${esc(l.book_title)}</strong></td>
+      <td>${esc(l.student_name)} <span class="muted">(${esc(l.username)})</span></td>
+      <td class="muted">${esc(l.issue_date || '')}</td>
+      <td class="muted">${esc(l.due_date || '')}</td>
+      <td><span class="badge ${l.status === 'issued' ? 'badge-yellow' : 'badge-green'}">${esc(l.status)}</span></td>
+      <td>${l.fine ? fmtMoney(l.fine) : '—'}</td>
+      <td class="muted">${esc(l.return_date || '—')}</td>
+      <td class="table-actions">
+        ${l.status === 'issued'
+          ? `<button class="btn btn-ghost btn-sm" onclick="returnLoan(${l.id}, '${esc(l.book_title)}')">RETURN</button>`
+          : '<span class="muted">—</span>'}
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">▤</span>No loans yet.</div></td></tr>';
+}
+
+function openLoanModal() {
+  (async () => {
+    if (!window._students || !window._students.length) window._students = await api('/api/admin/students');
+    const available = (window._books || []).filter(b => b.available > 0);
+    if (!available.length) return toast('No books available to issue (add books or wait for returns)', true);
+    showModal('Issue Book', `
+      <form id="loanForm">
+        <div class="form-grid">
+          <div class="field"><label>Book *</label>
+            <select name="book_id" required>
+              <option value="">Select book...</option>
+              ${available.map(b => `<option value="${b.id}">${esc(b.title)} (${b.available} available)</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Student *</label>
+            <select name="student_id" required>
+              <option value="">Select student...</option>
+              ${window._students.map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Due Date</label><input type="date" name="due_date" value="${todayStr()}"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+          <button type="submit" class="btn btn-purple">ISSUE BOOK</button>
+        </div>
+      </form>
+    `);
+    document.getElementById('loanForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      const body = { book_id: Number(f.get('book_id')), student_id: Number(f.get('student_id')), due_date: f.get('due_date') || undefined };
+      try {
+        await api('/api/admin/library/loans', { method: 'POST', body });
+        toast('Book issued'); closeModal(); loadLoans(); loadBooks();
+      } catch (err) { toast(err.message, true); }
+    });
+  })();
+}
+
+async function returnLoan(id, title) {
+  if (!confirm(`Mark "${title}" as returned? An overdue fine may apply.`)) return;
+  try {
+    const r = await api('/api/admin/library/loans/' + id + '/return', { method: 'POST' });
+    toast(r.fine ? `Returned — fine Rs. ${fmtMoney(r.fine)}` : 'Book returned');
+    loadLoans(); loadBooks();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Transport ----------
+async function loadRoutes() {
+  const routes = await api('/api/admin/routes');
+  window._routes = routes;
+  document.getElementById('routeRows').innerHTML = routes.length ? routes.map(r => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td class="muted">${esc(r.vehicle_no || '—')}</td>
+      <td>${esc(r.driver_name || '—')} ${r.driver_phone ? `<br><span class="muted">${esc(r.driver_phone)}</span>` : ''}</td>
+      <td>${fmtMoney(r.fee_monthly)}</td>
+      <td><span class="badge badge-cyan">${r.student_count}</span></td>
+      <td><span class="badge ${r.status === 'active' ? 'badge-green' : 'badge-red'}">${esc(r.status)}</span></td>
+      <td class="table-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openRouteModal(${r.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRoute(${r.id}, '${esc(r.name)}')">DEL</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">⧉</span>No routes configured.</div></td></tr>';
+}
+
+function openRouteModal(id) {
+  const r = (window._routes || []).find(x => x.id === id) || {};
+  showModal(r.id ? 'Edit Route' : 'Add Route', `
+    <form id="routeForm">
+      <div class="form-grid">
+        <div class="field span-2"><label>Route Name *</label><input name="name" required value="${esc(r.name || '')}" placeholder="e.g. Route 1 - Sector 7"></div>
+        <div class="field"><label>Vehicle No</label><input name="vehicle_no" value="${esc(r.vehicle_no || '')}" placeholder="MH-01-AB-1234"></div>
+        <div class="field"><label>Monthly Fee (Rs.)</label><input type="number" name="fee_monthly" min="0" value="${r.fee_monthly || ''}"></div>
+        <div class="field"><label>Driver Name</label><input name="driver_name" value="${esc(r.driver_name || '')}"></div>
+        <div class="field"><label>Driver Phone</label><input name="driver_phone" value="${esc(r.driver_phone || '')}"></div>
+        <div class="field"><label>Status</label>
+          <select name="status">
+            <option value="active" ${r.status === 'active' ? 'selected' : ''}>Active</option>
+            <option value="inactive" ${r.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${r.id ? 'SAVE CHANGES' : 'ADD ROUTE'}</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('routeForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = {
+      name: f.get('name'), vehicle_no: f.get('vehicle_no'), driver_name: f.get('driver_name'),
+      driver_phone: f.get('driver_phone'), fee_monthly: Number(f.get('fee_monthly')) || 0, status: f.get('status'),
+    };
+    try {
+      if (r.id) await api('/api/admin/routes/' + r.id, { method: 'PUT', body });
+      else await api('/api/admin/routes', { method: 'POST', body });
+      toast(r.id ? 'Route updated' : 'Route added');
+      closeModal(); loadRoutes(); loadRouteSelect();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteRoute(id, name) {
+  if (!confirm(`Delete route "${name}" and its student assignments?`)) return;
+  try {
+    await api('/api/admin/routes/' + id, { method: 'DELETE' });
+    toast('Route deleted'); loadRoutes(); loadRouteSelect();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadRouteSelect() {
+  try {
+    const routes = await api('/api/admin/routes');
+    window._routes = routes;
+    const sel = document.getElementById('routeSelect');
+    sel.innerHTML = routes.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('');
+    if (routes.length) loadRouteStudents();
+  } catch (_) {}
+}
+
+async function loadRouteStudents() {
+  const routeId = Number(document.getElementById('routeSelect').value);
+  if (!routeId) return;
+  const students = await api('/api/admin/routes/' + routeId + '/students');
+  document.getElementById('routeStudentRows').innerHTML = students.length ? students.map(s => `
+    <tr>
+      <td><strong>${esc(s.student_name)}</strong> <span class="muted">(${esc(s.username)})</span></td>
+      <td class="muted">${esc(s.mobile || '—')}</td>
+      <td>${esc(s.stop_name || '—')}</td>
+      <td class="muted">${esc(s.boarding_time || '—')}</td>
+      <td class="table-actions">
+        <button class="btn btn-danger btn-sm" onclick="removeRouteStudent(${s.student_id})">REMOVE</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No students on this route.</div></td></tr>';
+}
+
+async function openRouteStudentModal() {
+  if (!window._students || !window._students.length) window._students = await api('/api/admin/students');
+  const routeId = Number(document.getElementById('routeSelect').value);
+  showModal('Assign Student to Route', `
+    <form id="routeStudentForm">
+      <div class="form-grid">
+        <div class="field"><label>Student *</label>
+          <select name="student_id" required>
+            <option value="">Select student...</option>
+            ${window._students.map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.username)})</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Stop / Pickup Point</label><input name="stop_name" placeholder="e.g. Sector 7 Stop 4"></div>
+        <div class="field"><label>Boarding Time</label><input type="time" name="boarding_time" value="08:00"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">ASSIGN</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('routeStudentForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = { student_id: Number(f.get('student_id')), stop_name: f.get('stop_name'), boarding_time: f.get('boarding_time') };
+    try {
+      await api('/api/admin/routes/' + routeId + '/students', { method: 'POST', body });
+      toast('Student assigned'); closeModal(); loadRouteStudents();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function removeRouteStudent(studentId) {
+  const routeId = Number(document.getElementById('routeSelect').value);
+  if (!confirm('Remove this student from the route?')) return;
+  try {
+    await api('/api/admin/routes/' + routeId + '/students/' + studentId, { method: 'DELETE' });
+    toast('Student removed'); loadRouteStudents();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Broadcasts ----------
+async function loadBroadcastConfig() {
+  try {
+    const s = await api('/api/admin/notifications/status');
+    const badge = document.getElementById('broadcastCfgBadge');
+    badge.textContent = s.email_configured ? 'SMS/WhatsApp + EMAIL READY' : (s.configured ? 'GATEWAY READY' : 'SIMULATED MODE');
+    badge.className = 'badge ' + (s.configured || s.email_configured ? 'badge-green' : 'badge-yellow');
+  } catch (_) {}
+}
+
+async function loadBroadcasts() {
+  const list = await api('/api/admin/broadcasts');
+  document.getElementById('broadcastRows').innerHTML = list.length ? list.map(b => `
+    <tr>
+      <td><strong>${esc(b.title)}</strong></td>
+      <td><span class="badge badge-cyan">${esc(b.channel)}</span></td>
+      <td class="muted">${esc(b.audience)}</td>
+      <td>${b.recipient_count}</td>
+      <td><span class="badge badge-green">${b.sent}</span></td>
+      <td><span class="badge badge-red">${b.failed}</span></td>
+      <td class="muted">${esc((b.created_at || '').slice(0, 16))}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="viewBroadcastRecipients(${b.id})">VIEW LOG</button></td>
+    </tr>
+  `).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">✉</span>No broadcasts sent yet.</div></td></tr>';
+  document.getElementById('broadcastRecipientsView').innerHTML = '';
+}
+
+function toggleBroadcastAudience() {
+  const hint = document.getElementById('broadcastHint');
+  if (hint) hint.innerHTML = '';
+}
+
+async function sendBroadcast() {
+  const message = document.getElementById('broadcastMessage').value.trim();
+  if (!message) return toast('Enter a message first', true);
+  const body = {
+    title: document.getElementById('broadcastTitle').value.trim() || 'Broadcast',
+    message,
+    channel: document.getElementById('broadcastChannel').value,
+    audience: document.getElementById('broadcastAudience').value,
+  };
+  if (!confirm('Send this broadcast now to the selected audience?')) return;
+  try {
+    const hint = document.getElementById('broadcastHint');
+    hint.innerHTML = '<span style="color:var(--cyan)">Sending... this may take a moment.</span>';
+    const r = await api('/api/admin/broadcasts', { method: 'POST', body });
+    hint.innerHTML = `<span style="color:var(--green)">Sent to ${r.sent} of ${r.recipient_count} recipients (${r.failed} failed).</span>`;
+    toast('Broadcast sent');
+    loadBroadcasts();
+  } catch (err) {
+    document.getElementById('broadcastHint').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`;
+    toast('Broadcast failed', true);
+  }
+}
+
+async function viewBroadcastRecipients(id) {
+  const rec = await api('/api/admin/broadcasts/' + id + '/recipients');
+  document.getElementById('broadcastRecipientsView').innerHTML = `
+    <div class="panel">
+      <div class="panel-header"><h2>Recipient Log</h2>
+        <button class="btn btn-ghost btn-small" onclick="document.getElementById('broadcastRecipientsView').innerHTML=''">CLOSE</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Student</th><th>Contact</th><th>Status</th><th>Sent</th></tr></thead>
+          <tbody>
+            ${rec.map(r => `
+              <tr>
+                <td><strong>${esc(r.name)}</strong> <span class="muted">(${esc(r.username)})</span></td>
+                <td class="muted">${esc(r.channel === 'email' ? r.email : r.mobile)}</td>
+                <td><span class="badge ${r.status === 'sent' || r.status === 'sent-email' ? 'badge-green' : 'badge-red'}">${esc(r.status)}</span></td>
+                <td class="muted">${esc((r.sent_at || '').slice(0, 16))}</td>
+              </tr>`).join('') || '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">✉</span>No recipients logged.</div></td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ---------- Leave management ----------
+async function loadLeaves() {
+  const leaves = await api('/api/admin/leaves');
+  document.getElementById('leaveRows').innerHTML = leaves.length ? leaves.map(l => `
+    <tr>
+      <td><strong>${esc(l.employee_name || '—')}</strong><br><span class="muted">${esc(l.employee_type)}</span></td>
+      <td><span class="badge badge-purple">${esc(l.leave_type)}</span></td>
+      <td class="muted">${esc(l.reason || '—')}</td>
+      <td class="muted">${esc(l.start_date)}</td>
+      <td class="muted">${esc(l.end_date)}</td>
+      <td>${l.days}</td>
+      <td><span class="badge ${l.status === 'approved' ? 'badge-green' : l.status === 'rejected' ? 'badge-red' : 'badge-yellow'}">${esc(l.status)}</span></td>
+      <td class="muted">${esc((l.applied_on || '').slice(0, 16))}</td>
+      <td class="table-actions">
+        ${l.status === 'pending'
+          ? `<button class="btn btn-ghost btn-sm" onclick="reviewLeave(${l.id}, 'approved')">APPROVE</button>
+             <button class="btn btn-danger btn-sm" onclick="reviewLeave(${l.id}, 'rejected')">REJECT</button>`
+          : `<span class="muted">${esc(l.reviewed_by || '')}</span>`}
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="10"><div class="empty-state"><span class="es-icon">☍</span>No leave requests yet.</div></td></tr>';
+}
+
+async function loadLeaveCalendar() {
+  const leaves = await api('/api/admin/leaves/calendar');
+  document.getElementById('leaveCalendarRows').innerHTML = leaves.length ? leaves.map(l => `
+    <tr>
+      <td><strong>${esc(l.employee_name || '—')}</strong></td>
+      <td class="muted">${esc(l.employee_role || '—')}</td>
+      <td class="muted">${esc(l.start_date)}</td>
+      <td class="muted">${esc(l.end_date)}</td>
+      <td>${l.days}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">☍</span>No approved leave.</div></td></tr>';
+}
+
+async function reviewLeave(id, status) {
+  if (!confirm(`Mark this leave as ${status}?`)) return;
+  try {
+    await api('/api/admin/leaves/' + id + '/review', { method: 'POST', body: { status } });
+    toast('Leave ' + status);
+    loadLeaves(); loadLeaveCalendar();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- CSV import ----------
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(x => x.trim() !== '')) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (row.some(x => x.trim() !== '')) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function importCsv(kind) {
+  const input = document.getElementById(kind === 'stu' ? 'stuCsvFile' : 'enqCsvFile');
+  const file = input.files[0];
+  if (!file) return toast('Choose a .csv file first', true);
+  const text = await file.text();
+  const rows = parseCsv(text);
+  if (rows.length < 2) return toast('CSV must have a header row and at least one data row', true);
+  const headers = rows[0].map(h => h.trim().toLowerCase());
+  const dataRows = rows.slice(1);
+  if (kind === 'stu') {
+    const key = (r, ...names) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i >= 0 && r[i] !== undefined && r[i].trim() !== '') return r[i].trim(); }
+      return '';
+    };
+    const payload = dataRows.map(r => ({
+      username: key(r, 'username', 'student id', 'id'),
+      name: key(r, 'name', 'student name', 'full name'),
+      email: key(r, 'email'),
+      mobile: key(r, 'mobile', 'phone', 'phone number'),
+      fee_amount: Number(key(r, 'fee', 'fee amount', 'amount')) || 0,
+      fee_paid: key(r, 'fee paid', 'paid') ? key(r, 'fee paid', 'paid') : '',
+      fee_installments: Number(key(r, 'installments')) || 1,
+      fee_start_date: key(r, 'fee start', 'start date'),
+      password: key(r, 'password'),
+    }));
+    if (!payload.some(p => p.name)) return toast('No valid rows found. Expected columns: name, email, mobile, fee_amount...', true);
+    if (!confirm(`Import ${payload.length} student row(s)? Usernames will be auto-generated if missing, and new logins default to password "student123".`)) return;
+    try {
+      const r = await api('/api/admin/students/import', { method: 'POST', body: { rows: payload } });
+      const msg = `Imported ${r.created} students.` + (r.errors.length ? ` ${r.errors.length} skipped.` : '');
+      toast(msg); loadStudents();
+      input.value = '';
+    } catch (err) { toast(err.message, true); }
+  } else {
+    const key = (r, ...names) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i >= 0 && r[i] !== undefined && r[i].trim() !== '') return r[i].trim(); }
+      return '';
+    };
+    const payload = dataRows.map(r => ({
+      name: key(r, 'name', 'enquiry name'),
+      phone: key(r, 'phone', 'mobile'),
+      email: key(r, 'email'),
+      course: key(r, 'course', 'course code'),
+      source: key(r, 'source'),
+      status: key(r, 'status'),
+      notes: key(r, 'notes', 'message'),
+    }));
+    if (!payload.some(p => p.name)) return toast('No valid rows found. Expected columns: name, phone, email, course...', true);
+    if (!confirm(`Import ${payload.length} enquiry row(s)?`)) return;
+    try {
+      const r = await api('/api/admin/enquiries/import', { method: 'POST', body: { rows: payload } });
+      const msg = `Imported ${r.created} enquiries.` + (r.errors.length ? ` ${r.errors.length} skipped.` : '');
+      toast(msg); loadEnquiries();
+      input.value = '';
+    } catch (err) { toast(err.message, true); }
+  }
 }

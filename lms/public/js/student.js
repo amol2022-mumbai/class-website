@@ -13,6 +13,8 @@ const tabTitles = {
   fees: ['// STUDENT / FEES', 'Fees & Payments'],
   certificates: ['// STUDENT / CERTIFICATES', 'My Certificates'],
   notices: ['// STUDENT / NOTICES', 'Notices & Announcements'],
+  library: ['// STUDENT / LIBRARY', 'Library'],
+  transport: ['// STUDENT / TRANSPORT', 'Transport'],
   reportcard: ['// STUDENT / REPORT CARD', 'My Report Card'],
   idcard: ['// STUDENT / ID CARD', 'My ID Card'],
 };
@@ -50,6 +52,8 @@ function switchTab(tab) {
   else if (tab === 'fees') loadFees();
   else if (tab === 'certificates') loadCertificates();
   else if (tab === 'notices') loadStudentNotices();
+  else if (tab === 'library') loadLibrary();
+  else if (tab === 'transport') loadTransport();
   else if (tab === 'reportcard') loadStudentReportcard();
   else if (tab === 'idcard') loadStudentIdcard();
 }
@@ -544,6 +548,85 @@ async function loadStudentNotices() {
         <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
         <div class="ni-body">${esc(n.body || '')}</div>
       </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Library ----------
+async function loadLibrary() {
+  try {
+    const d = await api('/api/student/library');
+    const books = d.books || [];
+    const loans = d.loans || [];
+    document.getElementById('libBookCount').textContent = books.length + ' available';
+    document.getElementById('libraryBookGrid').innerHTML = books.length ? books.map(b => `
+      <div class="course-card">
+        <div class="cc-top">
+          <span class="badge badge-cyan">${esc(b.category)}</span>
+          <span class="badge badge-green">${b.available} in stock</span>
+        </div>
+        <h3>${esc(b.title)}</h3>
+        <p>${esc(b.author || '—')}</p>
+        <div class="course-meta">
+          <span class="badge badge-purple">${b.quantity} copies</span>
+          <span class="muted">${esc(b.isbn || '—')}</span>
+        </div>
+      </div>
+    `).join('') : '<div class="empty-state" style="grid-column:1/-1"><span class="es-icon">▤</span>No books available in the library right now.</div>';
+
+    document.getElementById('loanRows').innerHTML = loans.length ? loans.map(l => {
+      const overdue = l.status === 'issued' && l.due_date < todayStr();
+      return `
+      <tr>
+        <td><strong>${esc(l.book_title)}</strong></td>
+        <td class="muted">${esc(l.author || '—')}</td>
+        <td class="muted">${esc(l.issue_date || '—')}</td>
+        <td class="muted">${esc(l.due_date)}</td>
+        <td><span class="badge ${overdue ? 'badge-red' : l.status === 'returned' ? 'badge-green' : 'badge-yellow'}">${overdue ? 'OVERDUE' : esc(l.status.toUpperCase())}</span></td>
+        <td>${l.fine ? fmtMoney(l.fine) : '—'}</td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▤</span>You have not borrowed any books yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Transport ----------
+async function loadTransport() {
+  try {
+    const routes = await api('/api/student/transport');
+    const monthly = routes.reduce((s, r) => s + Number(r.fee_monthly || 0), 0);
+    document.getElementById('transportStatGrid').innerHTML = `
+      <div class="stat-card purple"><div class="stat-num">${routes.length}</div><div class="stat-label">Assigned Routes</div></div>
+      <div class="stat-card green"><div class="stat-num">Rs. ${monthly.toLocaleString('en-IN')}</div><div class="stat-label">Monthly Fee</div></div>
+    `;
+    document.getElementById('transportView').innerHTML = routes.length ? routes.map(r => `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">
+          <h2>${esc(r.route_name)}</h2>
+          <span class="badge badge-green">ACTIVE</span>
+        </div>
+        <div class="att-grid">
+          <div class="att-card">
+            <div class="att-name">Vehicle</div>
+            <div class="att-meta">${esc(r.vehicle_no || '—')}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-name">Driver</div>
+            <div class="att-meta">${esc(r.driver_name || '—')} ${r.driver_phone ? esc(r.driver_phone) : ''}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-name">Boarding Stop</div>
+            <div class="att-meta">${esc(r.stop_name || '—')}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-name">Boarding Time</div>
+            <div class="att-meta">${esc(r.boarding_time || '—')}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-name">Monthly Fee</div>
+            <div class="att-meta">Rs. ${Number(r.fee_monthly || 0).toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+      </div>
+    `).join('') : '<div class="empty-state"><span class="es-icon">⧉</span>You are not assigned to any transport route. Contact the office if you need transport.</div>';
   } catch (err) { toast(err.message, true); }
 }
 

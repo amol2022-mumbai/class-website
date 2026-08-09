@@ -352,6 +352,80 @@ db.exec(`
     note TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    author TEXT,
+    isbn TEXT,
+    category TEXT DEFAULT 'General',
+    quantity INTEGER DEFAULT 1,
+    available INTEGER DEFAULT 1,
+    added_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS library_loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    issue_date TEXT DEFAULT (date('now')),
+    due_date TEXT NOT NULL,
+    return_date TEXT,
+    status TEXT DEFAULT 'issued' CHECK (status IN ('issued', 'returned')),
+    fine REAL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    vehicle_no TEXT,
+    driver_name TEXT,
+    driver_phone TEXT,
+    fee_monthly REAL DEFAULT 0,
+    status TEXT DEFAULT 'active'
+  );
+
+  CREATE TABLE IF NOT EXISTS route_students (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    stop_name TEXT,
+    boarding_time TEXT,
+    UNIQUE(route_id, student_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS leaves (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_type TEXT NOT NULL CHECK (employee_type IN ('faculty', 'staff')),
+    employee_id INTEGER NOT NULL,
+    employee_name TEXT,
+    leave_type TEXT DEFAULT 'casual',
+    reason TEXT,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    days INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    applied_on TEXT DEFAULT (datetime('now')),
+    reviewed_by TEXT,
+    reviewed_on TEXT,
+    note TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    channel TEXT DEFAULT 'whatsapp',
+    audience TEXT,
+    recipient_count INTEGER DEFAULT 0,
+    sent INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'done',
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations for databases created by earlier versions of the app.
@@ -413,6 +487,7 @@ function migrate() {
   addCol('installments', 'last_reminder_at TEXT');
   addCol('courses', 'branch_id INTEGER');
   addCol('payments', 'branch_id INTEGER');
+  addCol('notifications', 'broadcast_id INTEGER');
 }
 
 // Backfills branch_id on rows created before branches existed, and guarantees a
@@ -846,6 +921,47 @@ function seedModules() {
     insertAsset.run(abid, 'Projector Epson EB-X41', 'AV Equipment', 'AV-001', 38000, formatFut(-60), 'in-use', 'Classroom 1');
     insertAsset.run(abid, 'Split AC 1.5T', 'Furniture & Appliances', 'AC-001', 32000, formatFut(-45), 'in-use', 'Front office');
     insertAsset.run(abid, 'Laser Printer HP M428', 'Computer', 'EQ-002', 24500, formatFut(-30), 'in-use', 'Admin desk');
+  }
+
+  // ---- Library: books ----
+  if (count('books') === 0) {
+    const insertBook = db.prepare(
+      'INSERT INTO books (branch_id, title, author, isbn, category, quantity, available) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const bbid = defBranchId();
+    const bookData = [
+      ['Python Crash Course', 'Eric Matthes', '9781593279288', 'Programming', 4, 4],
+      ['Introduction to Algorithms', 'Cormen et al.', '9780262033848', 'Computer Science', 2, 2],
+      ['Full-Stack Web Development', 'Chris Northwood', '9781484241532', 'Web Development', 3, 3],
+      ['Hands-On Machine Learning', 'Aurélien Géron', '9781492032649', 'AI / ML', 3, 3],
+      ['Database System Concepts', 'Silberschatz & Korth', '9780078022159', 'Databases', 2, 2],
+      ['Computer Networking: A Top-Down Approach', 'Kurose & Ross', '9780133594140', 'Networking', 2, 2],
+    ];
+    for (const b of bookData) insertBook.run(bbid, ...b);
+  }
+
+  // ---- Transport: routes + assignments ----
+  if (count('routes') === 0) {
+    const insertRoute = db.prepare(
+      'INSERT INTO routes (branch_id, name, vehicle_no, driver_name, driver_phone, fee_monthly, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const tbid = defBranchId();
+    const r1 = insertRoute.run(tbid, 'Route 1 - Sector 7', 'MH-01-AB-1234', 'Vikram Singh', '+91 98210 11111', 1500, 'active').lastInsertRowid;
+    const r2 = insertRoute.run(tbid, 'Route 2 - CBD Belapur', 'MH-01-CD-5678', 'Santosh Pawar', '+91 98210 22222', 1800, 'active').lastInsertRowid;
+    const r3 = insertRoute.run(tbid, 'Route 3 - Kharghar', 'MH-01-EF-9012', 'Ramesh Yadav', '+91 98210 33333', 1600, 'active').lastInsertRowid;
+    const insertRs = db.prepare(
+      'INSERT INTO route_students (route_id, student_id, stop_name, boarding_time) VALUES (?, ?, ?, ?)'
+    );
+    const rsMap = [
+      [r1, 'STU001', 'Sector 7 Stop 4', '07:45'],
+      [r1, 'STU003', 'Sector 12 Stop 2', '07:50'],
+      [r2, 'STU002', 'CBD Belapur Station', '08:00'],
+      [r3, 'STU005', 'Kharghar Sector 20', '07:55'],
+    ];
+    for (const [rid, stu, stop, time] of rsMap) {
+      const row = db.prepare('SELECT id FROM users WHERE username = ?').get(stu);
+      if (row) insertRs.run(rid, row.id, stop, time);
+    }
   }
 }
 

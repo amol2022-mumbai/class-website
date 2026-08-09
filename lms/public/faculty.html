@@ -29,6 +29,7 @@
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Grading</button>
+        <button class="nav-item" data-tab="leaves"><span class="nav-icon">☍</span> Leave</button>
       </nav>
       <div class="side-footer">
         <div class="side-user">
@@ -144,6 +145,52 @@
             <table>
               <thead><tr><th>Student</th><th>Content</th><th>Submitted</th><th>Score</th><th>Action</th></tr></thead>
               <tbody id="submissionRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <!-- Leave -->
+      <section id="tab-leaves" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Apply for Leave</h2></div>
+          <form id="leaveForm" class="notify-form" style="padding:16px 0">
+            <div class="form-grid">
+              <div class="field">
+                <label>Leave Type</label>
+                <select name="leave_type">
+                  <option value="casual">Casual Leave</option>
+                  <option value="sick">Sick Leave</option>
+                  <option value="earned">Earned Leave</option>
+                  <option value="unpaid">Unpaid Leave</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Start Date *</label>
+                <input type="date" name="start_date" required>
+              </div>
+              <div class="field">
+                <label>End Date *</label>
+                <input type="date" name="end_date" required>
+              </div>
+              <div class="field span-2">
+                <label>Reason</label>
+                <textarea name="reason" rows="2" placeholder="Brief reason for the leave..."></textarea>
+              </div>
+            </div>
+            <div class="modal-actions" style="padding-top:8px">
+              <button type="submit" class="btn btn-purple">APPLY FOR LEAVE</button>
+            </div>
+          </form>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>My Leave History</h2>
+            <button class="btn btn-ghost btn-small" onclick="loadLeaves()">REFRESH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Type</th><th>Reason</th><th>Start</th><th>End</th><th>Days</th><th>Status</th><th>Reviewed By</th></tr></thead>
+              <tbody id="leaveRows"></tbody>
             </table>
           </div>
         </div>

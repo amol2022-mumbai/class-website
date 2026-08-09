@@ -46,6 +46,10 @@
         <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
         <button class="nav-item" data-tab="vendors"><span class="nav-icon">₨</span> Vendors &amp; GST</button>
         <button class="nav-item" data-tab="assets"><span class="nav-icon">▣</span> Assets</button>
+        <button class="nav-item" data-tab="library"><span class="nav-icon">▤</span> Library</button>
+        <button class="nav-item" data-tab="transport"><span class="nav-icon">⧉</span> Transport</button>
+        <button class="nav-item" data-tab="broadcasts"><span class="nav-icon">✉</span> Broadcasts</button>
+        <button class="nav-item" data-tab="leaves"><span class="nav-icon">☍</span> Leave Management</button>
         <button class="nav-item" data-tab="reportcards"><span class="nav-icon">▤</span> Report Cards</button>
         <button class="nav-item" data-tab="idcards"><span class="nav-icon">◈</span> ID Cards</button>
         <button class="nav-item" data-tab="backup"><span class="nav-icon">↺</span> Backup &amp; Restore</button>
@@ -122,7 +126,11 @@
         <div class="panel">
           <div class="panel-header">
             <h2>Enquiries &amp; Leads</h2>
-            <button class="btn btn-purple btn-small" onclick="openEnquiryModal()">+ ADD ENQUIRY</button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-small" onclick="document.getElementById('enqCsvFile').click()">⬆ IMPORT CSV</button>
+              <input type="file" id="enqCsvFile" accept=".csv" style="display:none" onchange="importCsv('enq')">
+              <button class="btn btn-purple btn-small" onclick="openEnquiryModal()">+ ADD ENQUIRY</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -140,7 +148,11 @@
         <div class="panel">
           <div class="panel-header">
             <h2>Registered Students</h2>
-            <button class="btn btn-purple btn-small" onclick="openStudentModal()">+ ADD STUDENT</button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-small" onclick="document.getElementById('stuCsvFile').click()">⬆ IMPORT CSV</button>
+              <input type="file" id="stuCsvFile" accept=".csv" style="display:none" onchange="importCsv('stu')">
+              <button class="btn btn-purple btn-small" onclick="openStudentModal()">+ ADD STUDENT</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -499,6 +511,7 @@
                 <select id="notifyChannel">
                   <option value="sms">SMS</option>
                   <option value="whatsapp">WhatsApp</option>
+                  <option value="email">Email</option>
                 </select>
               </div>
               <div class="field">
@@ -641,6 +654,149 @@
         </div>
       </section>
 
+      <!-- Library -->
+      <section id="tab-library" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Book Catalog</h2>
+            <button class="btn btn-purple btn-small" onclick="openBookModal()">+ ADD BOOK</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Title</th><th>Author</th><th>ISBN</th><th>Category</th><th>Copies</th><th>Available</th><th>Issued</th><th>Actions</th></tr></thead>
+              <tbody id="bookRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Issue a Book</h2>
+            <button class="btn btn-purple btn-small" onclick="openLoanModal()">+ ISSUE BOOK</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Book</th><th>Student</th><th>Issue Date</th><th>Due Date</th><th>Status</th><th>Fine</th><th>Returned</th><th>Action</th></tr></thead>
+              <tbody id="loanRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Transport -->
+      <section id="tab-transport" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Transport Routes</h2>
+            <button class="btn btn-purple btn-small" onclick="openRouteModal()">+ ADD ROUTE</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Route</th><th>Vehicle</th><th>Driver</th><th>Monthly Fee</th><th>Students</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="routeRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Assign Students</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <select id="routeSelect" style="min-width:240px"></select>
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadRouteStudents()">LOAD</button>
+              <button class="btn btn-ghost btn-small" onclick="openRouteStudentModal()">+ ASSIGN STUDENT</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Student</th><th>Mobile</th><th>Stop</th><th>Boarding Time</th><th>Action</th></tr></thead>
+              <tbody id="routeStudentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Broadcasts -->
+      <section id="tab-broadcasts" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Bulk Broadcast (WhatsApp / SMS / Email)</h2>
+            <span class="badge" id="broadcastCfgBadge">checking...</span>
+          </div>
+          <div class="notify-form" style="padding:16px 0">
+            <div class="form-grid">
+              <div class="field">
+                <label>Channel</label>
+                <select id="broadcastChannel">
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="sms">SMS</option>
+                  <option value="email">Email</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Audience</label>
+                <select id="broadcastAudience" onchange="toggleBroadcastAudience()">
+                  <option value="all">All Students</option>
+                  <option value="due">Students with Overdue Fees</option>
+                  <option value="branch">Students in Active Branch</option>
+                </select>
+              </div>
+              <div class="field span-2">
+                <label>Title / Subject</label>
+                <input type="text" id="broadcastTitle" placeholder="e.g. Mid-term exam schedule">
+              </div>
+              <div class="field span-2">
+                <label>Message</label>
+                <textarea id="broadcastMessage" rows="3" placeholder="Write your message..."></textarea>
+              </div>
+            </div>
+            <div class="modal-actions" style="padding-top:8px">
+              <button class="btn btn-purple" onclick="sendBroadcast()">SEND BROADCAST</button>
+            </div>
+            <div class="alert" id="broadcastHint" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Broadcast History</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Title</th><th>Channel</th><th>Audience</th><th>Recipients</th><th>Sent</th><th>Failed</th><th>Created</th><th>Log</th></tr></thead>
+              <tbody id="broadcastRows"></tbody>
+            </table>
+          </div>
+          <div id="broadcastRecipientsView" style="margin-top:16px"></div>
+        </div>
+      </section>
+
+      <!-- Leave management -->
+      <section id="tab-leaves" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Leave Requests</h2>
+            <button class="btn btn-ghost btn-small" onclick="loadLeaves()">REFRESH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Employee</th><th>Type</th><th>Leave Type</th><th>Reason</th><th>Start</th><th>End</th><th>Days</th><th>Status</th><th>Applied</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="leaveRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Approved Leave Calendar</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Employee</th><th>Role</th><th>Start</th><th>End</th><th>Days</th></tr></thead>
+              <tbody id="leaveCalendarRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Report cards -->
       <section id="tab-reportcards" class="tab-panel hidden">
         <div class="panel">
@@ -738,6 +894,9 @@
                   <option value="reportcard">Report Cards</option>
                   <option value="gst">GST Summary</option>
                   <option value="assets">Assets / Inventory</option>
+                  <option value="library">Library</option>
+                  <option value="transport">Transport</option>
+                  <option value="leaves">Leave Register</option>
                 </select>
               </div>
               <button class="btn btn-purple btn-small" onclick="loadReports()">GENERATE</button>

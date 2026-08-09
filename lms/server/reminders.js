@@ -4,6 +4,7 @@
 
 const db = require('./db');
 const notify = require('./notify');
+const email = require('./email');
 const finance = require('./finance');
 
 let state = {
@@ -100,6 +101,18 @@ async function run() {
       message,
     });
 
+    // Email fallback: if WhatsApp can't be delivered (no/odd number, gateway
+    // error) and the student has an email + SMTP is configured, send by email.
+    let channel = 'whatsapp';
+    let finalStatus = res.status;
+    if (res.status === 'failed' && row.email && email.isConfigured()) {
+      const e = await email.sendEmail({ to: row.email, subject: 'Fee Reminder - VUMCA hITECH Computing', text: message });
+      if (e.status === 'sent') {
+        channel = 'email';
+        finalStatus = 'sent-email';
+      }
+    }
+
     db.prepare(
       `INSERT INTO reminders (install_id, student_id, due_date, amount, message, channel, status, sent_on, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -109,20 +122,20 @@ async function run() {
       row.due_date,
       row.due,
       message,
-      'whatsapp',
-      res.status,
+      channel,
+      finalStatus,
       today,
       started.toISOString()
     );
 
     db.prepare('UPDATE installments SET last_reminder_at = ? WHERE id = ?').run(started.toISOString(), row.id);
 
-    if (res.status === 'failed') {
+    if (finalStatus === 'failed') {
       state.failed += 1;
       state.log.push(`Failed: ${row.username} - ${res.detail}`);
     } else {
       state.sent += 1;
-      state.log.push(`${res.simulated ? '[simulated] ' : ''}${row.username} (${row.label}) Rs. ${finance.inr(row.due)} -> ${res.status}`);
+      state.log.push(`${res.simulated ? '[simulated] ' : ''}${row.username} (${row.label}) Rs. ${finance.inr(row.due)} -> ${finalStatus}${channel === 'email' ? ' (email fallback)' : ''}`);
     }
   }
 
@@ -138,6 +151,7 @@ async function run() {
 function status() {
   return {
     configured: notify.isConfigured(),
+    email_configured: email.isConfigured(),
     enabled: state.enabled,
     lastRun: state.lastRun,
     nextRun: state.nextRun,

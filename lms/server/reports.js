@@ -437,6 +437,72 @@ function assetsReport(bid) {
   };
 }
 
+function libraryReport(bid) {
+  const books = db.prepare(`
+    SELECT b.title, b.author, b.isbn, b.category, b.quantity, b.available,
+      (SELECT COUNT(*) FROM library_loans l WHERE l.book_id = b.id AND l.status = 'issued') AS issued
+    FROM books b WHERE ${bw('b', bid)} ORDER BY b.title
+  `).all(...args(bid));
+  const loans = db.prepare(`
+    SELECT l.issue_date, l.due_date, l.return_date, l.fine, l.status,
+           b.title AS book_title, u.name AS student_name
+    FROM library_loans l JOIN books b ON b.id = l.book_id JOIN users u ON u.id = l.student_id
+    WHERE ${bw('b', bid)} ORDER BY l.issue_date DESC
+  `).all(...args(bid));
+  return {
+    title: 'Library Report',
+    summary: [
+      { label: 'Titles', value: books.length },
+      { label: 'Copies', value: books.reduce((s, r) => s + (r.quantity || 0), 0) },
+      { label: 'Issued Now', value: loans.filter(r => r.status === 'issued').length },
+      { label: 'Fines Collected', value: formatMoney(loans.reduce((s, r) => s + (r.fine || 0), 0)) },
+    ],
+    columns: ['Book', 'Author', 'ISBN', 'Category', 'Total', 'Available', 'Issued'],
+    rows: books.map(r => [r.title, r.author || '—', r.isbn || '—', r.category || '—', r.quantity, r.available, r.issued]),
+  };
+}
+
+function transportReport(bid) {
+  const routes = db.prepare(`
+    SELECT r.name, r.vehicle_no, r.driver_name, r.driver_phone, r.fee_monthly, r.status,
+      (SELECT COUNT(*) FROM route_students rs WHERE rs.route_id = r.id) AS students
+    FROM routes r WHERE ${bw('r', bid)} ORDER BY r.name
+  `).all(...args(bid));
+  const assignments = db.prepare(`
+    SELECT r.name AS route_name, rs.stop_name, rs.boarding_time, u.name AS student_name, u.username
+    FROM route_students rs JOIN routes r ON r.id = rs.route_id JOIN users u ON u.id = rs.student_id
+    WHERE ${bw('r', bid)} ORDER BY r.name, rs.boarding_time
+  `).all(...args(bid));
+  return {
+    title: 'Transport Report',
+    summary: [
+      { label: 'Active Routes', value: routes.filter(r => r.status === 'active').length },
+      { label: 'Students Assigned', value: assignments.length },
+      { label: 'Monthly Transport Revenue', value: formatMoney(routes.reduce((s, r) => s + (r.fee_monthly || 0) * r.students, 0)) },
+    ],
+    columns: ['Route', 'Vehicle', 'Driver', 'Monthly Fee', 'Students', 'Status'],
+    rows: routes.map(r => [r.name, r.vehicle_no || '—', (r.driver_name || '') + ' ' + (r.driver_phone || ''), formatMoney(r.fee_monthly), r.students, r.status]),
+  };
+}
+
+function leavesReport() {
+  const rows = db.prepare(`
+    SELECT l.employee_name, l.employee_type, l.leave_type, l.start_date, l.end_date, l.days, l.status, l.applied_on
+    FROM leaves l ORDER BY l.applied_on DESC
+  `).all();
+  return {
+    title: 'Leave Register',
+    summary: [
+      { label: 'Total Requests', value: rows.length },
+      { label: 'Pending', value: rows.filter(r => r.status === 'pending').length },
+      { label: 'Approved', value: rows.filter(r => r.status === 'approved').length },
+      { label: 'Rejected', value: rows.filter(r => r.status === 'rejected').length },
+    ],
+    columns: ['Employee', 'Type', 'Leave Type', 'Start', 'End', 'Days', 'Status', 'Applied'],
+    rows: rows.map(r => [r.employee_name, r.employee_type, r.leave_type, r.start_date, r.end_date, r.days, r.status, (r.applied_on || '').slice(0, 16)]),
+  };
+}
+
 function formatMoney(n) {
   return 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
@@ -458,6 +524,9 @@ const builders = {
   reportcard: reportcardReport,
   gst: gstReport,
   assets: assetsReport,
+  library: libraryReport,
+  transport: transportReport,
+  leaves: leavesReport,
 };
 
 module.exports = { builders, formatMoney };

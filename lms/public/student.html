@@ -34,6 +34,8 @@
         <button class="nav-item" data-tab="fees"><span class="nav-icon">₿</span> Fees</button>
         <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
         <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
+        <button class="nav-item" data-tab="library"><span class="nav-icon">▤</span> Library</button>
+        <button class="nav-item" data-tab="transport"><span class="nav-icon">⧉</span> Transport</button>
         <button class="nav-item" data-tab="reportcard"><span class="nav-icon">▤</span> Report Card</button>
         <button class="nav-item" data-tab="idcard"><span class="nav-icon">◈</span> ID Card</button>
       </nav>
@@ -220,6 +222,35 @@
         <div class="panel">
           <div class="panel-header"><h2>Notices &amp; Announcements</h2></div>
           <div class="notice-list" id="studentNotices"></div>
+        </div>
+      </section>
+
+      <!-- Library -->
+      <section id="tab-library" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Available Books</h2>
+            <span class="badge" id="libBookCount">—</span>
+          </div>
+          <div class="course-grid" id="libraryBookGrid"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>My Borrowed Books</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Book</th><th>Author</th><th>Issued</th><th>Due Date</th><th>Status</th><th>Fine</th></tr></thead>
+              <tbody id="loanRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Transport -->
+      <section id="tab-transport" class="tab-panel hidden">
+        <div class="stat-grid" id="transportStatGrid"></div>
+        <div class="panel">
+          <div class="panel-header"><h2>My Transport Route</h2></div>
+          <div id="transportView"></div>
         </div>
       </section>
 

@@ -9,6 +9,8 @@ const razorpay = require('./razorpay');
 const finance = require('./finance');
 const payroll = require('./payroll');
 const reminders = require('./reminders');
+const broadcasts = require('./broadcasts');
+const email = require('./email');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1333,7 +1335,7 @@ app.get('/api/admin/notifications', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/notifications/status', requireAdmin, (req, res) => {
-  res.json({ configured: notify.isConfigured() });
+  res.json({ configured: notify.isConfigured(), email_configured: email.isConfigured() });
 });
 
 app.post('/api/admin/notifications/send', requireAdmin, async (req, res) => {
@@ -1343,9 +1345,14 @@ app.post('/api/admin/notifications/send', requireAdmin, async (req, res) => {
   }
   const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(student_id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
-  if (!student.mobile) return res.status(400).json({ error: 'Student has no mobile number' });
   const msg = message || defaultReminder(student, purpose);
-  const result = await notify.sendReminder({ to: student.mobile, channel, message: msg });
+  let result;
+  if (channel === 'email') {
+    result = await email.sendEmail({ to: student.email, subject: 'Notice from VUMCA hITECH Computing', text: msg });
+  } else {
+    if (!student.mobile) return res.status(400).json({ error: 'Student has no mobile number' });
+    result = await notify.sendReminder({ to: student.mobile, channel, message: msg });
+  }
   db.prepare(
     'INSERT INTO notifications (student_id, channel, purpose, message, status, sent_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))'
   ).run(student_id, channel, purpose, msg, result.status);
@@ -1363,10 +1370,16 @@ app.post('/api/admin/notifications/send-all', requireAdmin, async (req, res) => 
   );
   let sent = 0;
   for (const s of students) {
-    if (!s.mobile) continue;
     const msg = defaultReminder(s, purpose);
-    const result = await notify.sendReminder({ to: s.mobile, channel: channel || 'sms', message: msg });
-    insert.run(s.id, channel || 'sms', purpose, msg, result.status);
+    let result;
+    if (channel === 'email') {
+      if (!s.email) continue;
+      result = await email.sendEmail({ to: s.email, subject: 'Notice from VUMCA hITECH Computing', text: msg });
+    } else {
+      if (!s.mobile) continue;
+      result = await notify.sendReminder({ to: s.mobile, channel: channel || 'sms', message: msg });
+    }
+    insert.run(s.id, channel === 'email' ? 'email' : (channel || 'sms'), purpose, msg, result.status);
     if (result.status === 'sent') sent += 1;
   }
   res.json({ ok: true, sent });
@@ -2120,6 +2133,64 @@ app.get('/api/parent/notices', requireParent, (req, res) => {
   res.json(rows);
 });
 
+// ---------- Student: library ----------
+app.get('/api/student/library', requireStudent, (req, res) => {
+  const books = db.prepare(`
+    SELECT b.* FROM books b
+    WHERE ${branchWhere('b', req.session.user.branch_id)} AND b.available > 0
+    ORDER BY b.title
+  `).all(...(req.session.user.branch_id ? [req.session.user.branch_id] : []));
+  const loans = db.prepare(`
+    SELECT l.*, b.title AS book_title, b.author
+    FROM library_loans l JOIN books b ON b.id = l.book_id
+    WHERE l.student_id = ? ORDER BY l.issue_date DESC
+  `).all(req.session.user.id);
+  res.json({ books, loans });
+});
+
+app.get('/api/student/library/issued', requireStudent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT l.*, b.title AS book_title, b.author
+    FROM library_loans l JOIN books b ON b.id = l.book_id
+    WHERE l.student_id = ? AND l.status = 'issued' ORDER BY l.due_date
+  `).all(req.session.user.id));
+});
+
+// ---------- Student: transport ----------
+app.get('/api/student/transport', requireStudent, (req, res) => {
+  const row = db.prepare(`
+    SELECT rs.*, r.name AS route_name, r.vehicle_no, r.driver_name, r.driver_phone, r.fee_monthly
+    FROM route_students rs JOIN routes r ON r.id = rs.route_id
+    WHERE rs.student_id = ? AND r.status = 'active'
+  `).all(req.session.user.id);
+  res.json(row);
+});
+
+// ---------- Faculty: leave management ----------
+app.get('/api/faculty/leaves', requireFaculty, (req, res) => {
+  res.json(db.prepare(`
+    SELECT * FROM leaves WHERE employee_type = 'faculty' AND employee_id = ? ORDER BY applied_on DESC
+  `).all(req.session.user.id));
+});
+
+app.post('/api/faculty/leaves', requireFaculty, (req, res) => {
+  const { leave_type, reason, start_date, end_date } = req.body || {};
+  if (!start_date || !end_date) return res.status(400).json({ error: 'Start and end dates are required' });
+  if (start_date > end_date) return res.status(400).json({ error: 'Start date must be before end date' });
+  const start = new Date(start_date + 'T00:00:00');
+  const end = new Date(end_date + 'T00:00:00');
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (days > 30) return res.status(400).json({ error: 'Leave cannot exceed 30 days' });
+  const result = db.prepare(
+    `INSERT INTO leaves (employee_type, employee_id, employee_name, leave_type, reason, start_date, end_date, days, status)
+     VALUES ('faculty', ?, ?, ?, ?, ?, ?, ?, 'pending')`
+  ).run(req.session.user.id, req.session.user.name, leave_type || 'casual', reason || '', start_date, end_date, days);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+// ---------- Staff: leave (apply/status via admin account is used for approvals) ----------
+// Staff leave applications come through the admin console (staff are not portal users).
+
 // ---------- Online admission (public, no auth) ----------
 app.get('/api/public/courses', (req, res) => {
   res.json(db.prepare('SELECT c.id, c.code, c.title, c.weeks AS duration, c.level FROM courses c ORDER BY c.title').all());
@@ -2170,6 +2241,271 @@ app.get('/api/admin/dashboard/charts', requireAdmin, (req, res) => {
   `).all(...a);
 
   res.json({ revenue_by_month: revenueByMonth, fee_status: { paid, pending, overdue }, enquiries, top_courses: topCourses });
+});
+
+// =====================================================================
+// ============ BROADCASTS, LIBRARY, TRANSPORT, LEAVES, IMPORTS =========
+// =====================================================================
+
+// ---------- Bulk broadcasts ----------
+app.get('/api/admin/broadcasts', requireAdmin, (req, res) => {
+  res.json(broadcasts.list());
+});
+
+app.post('/api/admin/broadcasts', requireAdmin, async (req, res) => {
+  const { title, message, channel, audience, branch_id, student_ids } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'Message is required' });
+  const summary = await broadcasts.run({
+    title, message, channel: channel || 'whatsapp', audience: audience || 'all',
+    branch_id: audience === 'branch' ? branch_id || activeBranch(req) : null,
+    student_ids, created_by: req.session.user.username,
+  });
+  res.status(201).json(summary);
+});
+
+app.get('/api/admin/broadcasts/:id/recipients', requireAdmin, (req, res) => {
+  res.json(broadcasts.recipients(req.params.id));
+});
+
+// ---------- Library ----------
+app.get('/api/admin/books', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT b.*,
+      (SELECT COUNT(*) FROM library_loans l WHERE l.book_id = b.id AND l.status = 'issued') AS issued_count
+    FROM books b WHERE ${branchWhere('b', bid)} ORDER BY b.title
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/books', requireAdmin, (req, res) => {
+  const { title, author, isbn, category, quantity } = req.body || {};
+  if (!title) return res.status(400).json({ error: 'Book title is required' });
+  const qty = Math.max(0, Number(quantity) || 1);
+  const bid = activeBranch(req);
+  const result = db.prepare(
+    'INSERT INTO books (branch_id, title, author, isbn, category, quantity, available) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(bid, title, author || '', isbn || '', category || 'General', qty, qty);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/books/:id', requireAdmin, (req, res) => {
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(req.params.id);
+  if (!book) return res.status(404).json({ error: 'Book not found' });
+  const { title, author, isbn, category, quantity } = req.body || {};
+  const qty = quantity != null ? Math.max(0, Number(quantity)) : book.quantity;
+  const issued = db.prepare("SELECT COUNT(*) AS c FROM library_loans WHERE book_id = ? AND status = 'issued'").get(book.id).c;
+  db.prepare('UPDATE books SET title = ?, author = ?, isbn = ?, category = ?, quantity = ?, available = ? WHERE id = ?')
+    .run(title || book.title, author ?? book.author, isbn ?? book.isbn, category || book.category, qty, Math.max(0, qty - issued), book.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/books/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/library/loans', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT l.*, b.title AS book_title, u.name AS student_name, u.username
+    FROM library_loans l
+    JOIN books b ON b.id = l.book_id
+    JOIN users u ON u.id = l.student_id
+    WHERE ${branchWhere('b', bid)}
+    ORDER BY l.issue_date DESC, l.id DESC
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/library/loans', requireAdmin, (req, res) => {
+  const { book_id, student_id, due_date } = req.body || {};
+  if (!book_id || !student_id) return res.status(400).json({ error: 'Book and student are required' });
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(book_id);
+  if (!book) return res.status(404).json({ error: 'Book not found' });
+  const available = Number(book.available) || 0;
+  if (available <= 0) return res.status(400).json({ error: 'No copies available for issue' });
+  const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(student_id);
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  const existing = db.prepare("SELECT id FROM library_loans WHERE book_id = ? AND student_id = ? AND status = 'issued'").get(book_id, student_id);
+  if (existing) return res.status(400).json({ error: 'Student already has this book issued' });
+  const d = due_date || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const result = db.prepare(
+    'INSERT INTO library_loans (book_id, student_id, issue_date, due_date, status) VALUES (?, ?, date(\'now\'), ?, \'issued\')'
+  ).run(book_id, student_id, d);
+  db.prepare('UPDATE books SET available = available - 1 WHERE id = ?').run(book_id);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.post('/api/admin/library/loans/:id/return', requireAdmin, (req, res) => {
+  const loan = db.prepare("SELECT * FROM library_loans WHERE id = ? AND status = 'issued'").get(req.params.id);
+  if (!loan) return res.status(404).json({ error: 'Active loan not found' });
+  const overdue = Math.max(0, Math.round((Date.now() - new Date(loan.due_date + 'T00:00:00')) / 86400000));
+  const fine = overdue > 0 ? Math.round(overdue * 5 * 100) / 100 : 0;
+  db.prepare("UPDATE library_loans SET status = 'returned', return_date = date('now'), fine = ? WHERE id = ?").run(fine, loan.id);
+  db.prepare('UPDATE books SET available = available + 1 WHERE id = ?').run(loan.book_id);
+  res.json({ ok: true, fine });
+});
+
+// ---------- Transport ----------
+app.get('/api/admin/routes', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT r.*, b.name AS branch_name,
+      (SELECT COUNT(*) FROM route_students rs WHERE rs.route_id = r.id) AS student_count
+    FROM routes r JOIN branches b ON b.id = r.branch_id
+    WHERE ${branchWhere('r', bid)} ORDER BY r.name
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/routes', requireAdmin, (req, res) => {
+  const { name, vehicle_no, driver_name, driver_phone, fee_monthly, status } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Route name is required' });
+  const bid = activeBranch(req);
+  const result = db.prepare(
+    'INSERT INTO routes (branch_id, name, vehicle_no, driver_name, driver_phone, fee_monthly, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(bid, name, vehicle_no || '', driver_name || '', driver_phone || '', Number(fee_monthly) || 0, status || 'active');
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/routes/:id', requireAdmin, (req, res) => {
+  const route = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
+  if (!route) return res.status(404).json({ error: 'Route not found' });
+  const { name, vehicle_no, driver_name, driver_phone, fee_monthly, status } = req.body || {};
+  db.prepare('UPDATE routes SET name = ?, vehicle_no = ?, driver_name = ?, driver_phone = ?, fee_monthly = ?, status = ? WHERE id = ?')
+    .run(name || route.name, vehicle_no ?? route.vehicle_no, driver_name ?? route.driver_name,
+         driver_phone ?? route.driver_phone, fee_monthly != null ? Number(fee_monthly) : route.fee_monthly,
+         status || route.status, route.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/routes/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM routes WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/routes/:id/students', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT rs.*, u.name AS student_name, u.username, u.mobile
+    FROM route_students rs JOIN users u ON u.id = rs.student_id
+    WHERE rs.route_id = ? ORDER BY rs.boarding_time
+  `).all(req.params.id));
+});
+
+app.post('/api/admin/routes/:id/students', requireAdmin, (req, res) => {
+  const { student_id, stop_name, boarding_time } = req.body || {};
+  if (!student_id) return res.status(400).json({ error: 'Student is required' });
+  const route = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
+  if (!route) return res.status(404).json({ error: 'Route not found' });
+  const dup = db.prepare('SELECT id FROM route_students WHERE route_id = ? AND student_id = ?').get(route.id, student_id);
+  if (dup) return res.status(400).json({ error: 'Student is already on this route' });
+  db.prepare('INSERT INTO route_students (route_id, student_id, stop_name, boarding_time) VALUES (?, ?, ?, ?)')
+    .run(route.id, student_id, stop_name || '', boarding_time || '');
+  res.status(201).json({ ok: true });
+});
+
+app.delete('/api/admin/routes/:id/students/:sid', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM route_students WHERE route_id = ? AND student_id = ?').run(req.params.id, req.params.sid);
+  res.json({ ok: true });
+});
+
+// ---------- Leaves ----------
+app.get('/api/admin/leaves', requireAdmin, (req, res) => {
+  res.json(db.prepare('SELECT * FROM leaves ORDER BY applied_on DESC, id DESC LIMIT 200').all());
+});
+
+app.get('/api/admin/leaves/calendar', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT l.*, CASE WHEN l.employee_type = 'staff' THEN s.role ELSE 'Faculty' END AS employee_role
+    FROM leaves l
+    LEFT JOIN staff s ON l.employee_type = 'staff' AND s.id = l.employee_id
+    WHERE l.status = 'approved'
+    ORDER BY l.start_date
+  `).all());
+});
+
+app.post('/api/admin/leaves/:id/review', requireAdmin, (req, res) => {
+  const leave = db.prepare('SELECT * FROM leaves WHERE id = ? AND status = \'pending\'').get(req.params.id);
+  if (!leave) return res.status(404).json({ error: 'Pending leave not found' });
+  const { status, note } = req.body || {};
+  if (!status || !['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Status must be approved or rejected' });
+  }
+  db.prepare('UPDATE leaves SET status = ?, note = ?, reviewed_by = ?, reviewed_on = datetime(\'now\') WHERE id = ?')
+    .run(status, note || leave.note, req.session.user.username, leave.id);
+  // Approved staff leave is reflected in the attendance ledger so payroll sees it.
+  if (status === 'approved' && leave.employee_type === 'staff') {
+    const addLeave = db.prepare('INSERT OR IGNORE INTO staff_attendance (staff_id, date, status) VALUES (?, ?, \'leave\')');
+    const start = new Date(leave.start_date + 'T00:00:00');
+    const end = new Date(leave.end_date + 'T00:00:00');
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      addLeave.run(leave.employee_id, d.toISOString().slice(0, 10));
+    }
+  }
+  res.json({ ok: true });
+});
+
+// ---------- Bulk CSV imports ----------
+app.post('/api/admin/students/import', requireAdmin, (req, res) => {
+  const rows = (req.body || {}).rows;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'No rows to import' });
+  }
+  const bid = activeBranch(req);
+  const insert = db.prepare(
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id, discount_type, discount_value, fee_installments, fee_start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  let created = 0;
+  const errors = [];
+  for (const r of rows) {
+    const name = String(r.name || '').trim();
+    const email = String(r.email || '').trim();
+    const mobile = String(r.mobile || '').trim();
+    const fee = Number(r.fee_amount) || 0;
+    const feePaid = String(r.fee_paid || '').toLowerCase() === 'yes' || r.fee_paid === 1 || r.fee_paid === '1';
+    if (!name) { errors.push({ row: name || '(unnamed)', error: 'Missing name' }); continue; }
+    const base = String(r.username || '').trim() || ('STU' + String(Date.now()).slice(-6));
+    let username = base;
+    let n = 2;
+    while (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) username = `${base}${n++}`;
+    const pass = String(r.password || '').trim() || 'student123';
+    const result = insert.run('student', username, bcrypt.hashSync(pass, 10), name, email || null, mobile || null,
+      fee, feePaid ? 1 : 0, bid, 'none', 0,
+      Number(r.fee_installments) > 1 ? Number(r.fee_installments) : 1, r.fee_start_date || null);
+    finance.ensureInstallments(result.lastInsertRowid);
+    finance.refreshFeeStatus(result.lastInsertRowid);
+    created += 1;
+  }
+  res.status(201).json({ created, errors });
+});
+
+app.post('/api/admin/enquiries/import', requireAdmin, (req, res) => {
+  const rows = (req.body || {}).rows;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'No rows to import' });
+  }
+  const bid = activeBranch(req);
+  const insert = db.prepare(
+    'INSERT INTO enquiries (branch_id, name, phone, email, course_id, source, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  const courseByCode = {};
+  for (const c of db.prepare('SELECT id, code, title FROM courses').all()) {
+    courseByCode[c.code.toLowerCase()] = c.id;
+    courseByCode[c.title.toLowerCase()] = c.id;
+  }
+  let created = 0;
+  const errors = [];
+  for (const r of rows) {
+    const name = String(r.name || '').trim();
+    if (!name) { errors.push({ row: name || '(unnamed)', error: 'Missing name' }); continue; }
+    const courseKey = String(r.course || '').trim().toLowerCase();
+    const courseId = courseByCode[courseKey] || null;
+    const validStatus = ['new', 'contacted', 'follow-up', 'enrolled', 'lost'];
+    const status = validStatus.includes(String(r.status || '').trim().toLowerCase())
+      ? String(r.status).trim().toLowerCase() : 'new';
+    insert.run(bid, name, String(r.phone || '').trim() || null, String(r.email || '').trim() || null,
+      courseId, String(r.source || '').trim() || 'Import', status, String(r.notes || '').trim() || null);
+    created += 1;
+  }
+  res.status(201).json({ created, errors });
 });
 
 app.listen(PORT, () => {
