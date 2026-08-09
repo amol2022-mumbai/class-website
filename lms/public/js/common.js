@@ -70,3 +70,33 @@ async function logout() {
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
+
+// ---------- Mobile navigation (off-canvas drawer) ----------
+function toggleSidebar() {
+  document.querySelector('.dash').classList.toggle('sidebar-open');
+}
+
+function closeSidebar() {
+  document.querySelector('.dash').classList.remove('sidebar-open');
+}
+
+// Shared init: inject the backdrop, auto-close the drawer on nav / backdrop /
+// ESC, and let the hamburger stay visible whenever the sidebar is open.
+document.addEventListener('DOMContentLoaded', () => {
+  const dash = document.querySelector('.dash');
+  if (!dash) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'side-backdrop';
+  backdrop.addEventListener('click', closeSidebar);
+  dash.appendChild(backdrop);
+
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', closeSidebar);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSidebar();
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.side-footer .btn')) closeSidebar();
+  });
+});
