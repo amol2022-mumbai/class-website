@@ -462,6 +462,67 @@ function libraryReport(bid) {
   };
 }
 
+// Detailed loan ledger - every issue and return transaction.
+function bookIssuesReport(bid) {
+  const rows = db.prepare(`
+    SELECT l.id, b.title AS book_title, u.username, u.name AS student_name,
+           l.issue_date, l.due_date, l.return_date, l.status, l.fine
+    FROM library_loans l JOIN books b ON b.id = l.book_id JOIN users u ON u.id = l.student_id
+    WHERE ${bw('b', bid)}
+    ORDER BY l.issue_date DESC, l.id DESC
+  `).all(...args(bid));
+  const today = new Date().toISOString().slice(0, 10);
+  const overdueNow = rows.filter(r => r.status === 'issued' && r.due_date < today);
+  return {
+    title: 'Book Issue Register',
+    summary: [
+      { label: 'Total Issues', value: rows.length },
+      { label: 'Currently Issued', value: rows.filter(r => r.status === 'issued').length },
+      { label: 'Returned', value: rows.filter(r => r.status === 'returned').length },
+      { label: 'Overdue Right Now', value: overdueNow.length },
+      { label: 'Fines Levied', value: formatMoney(rows.reduce((s, r) => s + (r.fine || 0), 0)) },
+    ],
+    columns: ['Issue ID', 'Book', 'Student ID', 'Student', 'Issue Date', 'Due Date', 'Return Date', 'Status', 'Overdue (Days)', 'Fine'],
+    rows: rows.map(r => {
+      const overdueDays = r.status === 'issued' && r.due_date < today
+        ? Math.round((new Date(today) - new Date(r.due_date + 'T00:00:00')) / 86400000) : 0;
+      return [
+        r.id, r.book_title, r.username, r.student_name, r.issue_date || '—', r.due_date,
+        r.return_date || '—', r.status, overdueDays ? overdueDays : '—', formatMoney(r.fine),
+      ];
+    }),
+  };
+}
+
+// Books currently on loan that are past their due date.
+function overdueReport(bid) {
+  const rows = db.prepare(`
+    SELECT b.title AS book_title, u.username, u.name AS student_name, u.mobile,
+           l.issue_date, l.due_date, l.fine
+    FROM library_loans l JOIN books b ON b.id = l.book_id JOIN users u ON u.id = l.student_id
+    WHERE ${bw('b', bid)} AND l.status = 'issued'
+    ORDER BY l.due_date
+  `).all(...args(bid));
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = rows.filter(r => r.due_date < today).map(r => ({
+    ...r,
+    days: Math.round((new Date(today) - new Date(r.due_date + 'T00:00:00')) / 86400000),
+  }));
+  return {
+    title: 'Overdue Books Report',
+    summary: [
+      { label: 'Overdue Books', value: overdue.length },
+      { label: 'Affected Students', value: [...new Set(overdue.map(r => r.username))].length },
+      { label: 'Total Fines Due', value: formatMoney(overdue.reduce((s, r) => s + r.days * 5, 0)) },
+    ],
+    columns: ['Book', 'Student ID', 'Student', 'Mobile', 'Issue Date', 'Due Date', 'Days Overdue', 'Fine @ Rs.5/day'],
+    rows: overdue.map(r => [
+      r.book_title, r.username, r.student_name, r.mobile || '—', r.issue_date, r.due_date,
+      r.days, formatMoney(r.days * 5),
+    ]),
+  };
+}
+
 function transportReport(bid) {
   const routes = db.prepare(`
     SELECT r.name, r.vehicle_no, r.driver_name, r.driver_phone, r.fee_monthly, r.status,
@@ -525,6 +586,8 @@ const builders = {
   gst: gstReport,
   assets: assetsReport,
   library: libraryReport,
+  bookissues: bookIssuesReport,
+  overdue: overdueReport,
   transport: transportReport,
   leaves: leavesReport,
 };
