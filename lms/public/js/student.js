@@ -12,6 +12,9 @@ const tabTitles = {
   grades: ['// STUDENT / GRADES', 'Grades & Results'],
   fees: ['// STUDENT / FEES', 'Fees & Payments'],
   certificates: ['// STUDENT / CERTIFICATES', 'My Certificates'],
+  notices: ['// STUDENT / NOTICES', 'Notices & Announcements'],
+  reportcard: ['// STUDENT / REPORT CARD', 'My Report Card'],
+  idcard: ['// STUDENT / ID CARD', 'My ID Card'],
 };
 
 (async function init() {
@@ -46,6 +49,9 @@ function switchTab(tab) {
   else if (tab === 'grades') loadGrades();
   else if (tab === 'fees') loadFees();
   else if (tab === 'certificates') loadCertificates();
+  else if (tab === 'notices') loadStudentNotices();
+  else if (tab === 'reportcard') loadStudentReportcard();
+  else if (tab === 'idcard') loadStudentIdcard();
 }
 
 async function loadDashboard() {
@@ -526,6 +532,102 @@ async function loadGrades() {
       <td>${g.score}/${g.total} <span class="badge badge-${pct >= 70 ? 'green' : pct >= 50 ? 'yellow' : 'red'}" style="margin-left:6px">${pct}%</span></td>
     </tr>`;
   }).join('') : '<tr><td colspan="3"><div class="empty-state"><span class="es-icon">▤</span>No quiz results yet.</div></td></tr>';
+}
+
+// ---------- Notices ----------
+async function loadStudentNotices() {
+  try {
+    const notices = await api('/api/student/notices');
+    document.getElementById('studentNotices').innerHTML = notices.length ? notices.map(n => `
+      <div class="notice-item">
+        <h3>${esc(n.title)}</h3>
+        <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
+        <div class="ni-body">${esc(n.body || '')}</div>
+      </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Report card ----------
+async function loadStudentReportcard() {
+  try {
+    const rc = await api('/api/student/reportcard');
+    document.getElementById('studentReportcard').innerHTML = renderStudentReportcard(rc);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderStudentReportcard(rc) {
+  const rows = rc.courses.map(c => `
+    <div class="rc-course">
+      <div class="rc-course-head"><span>${esc(c.code)} — ${esc(c.title)} <span class="sheet-muted">(${esc(c.instructor || '—')})</span></span>
+        <span class="rc-grade">GRADE ${esc(c.grade || '—')} · ${esc(c.remark)}</span></div>
+      <table>
+        <tr><th>Exam</th><th>Date</th><th>Max Marks</th><th>Marks</th><th>%</th></tr>
+        ${c.exams.map(e => `<tr><td>${esc(e.title)}</td><td>${esc(e.exam_date || '—')}</td><td>${e.max_marks}</td><td>${e.marks != null ? e.marks : '—'}</td><td>${e.marks != null ? e.pct + '%' : '—'}</td></tr>`).join('')}
+        <tr><td colspan="5" class="sheet-muted">Attendance: ${c.attendance.present}/${c.attendance.total} (${c.attendance.pct != null ? c.attendance.pct + '%' : '—'}) &nbsp;·&nbsp; Assignments: ${c.assignments.filter(a => a.score != null).length}/${c.assignments.length} submitted</td></tr>
+      </table>
+    </div>`).join('');
+  return `
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> COMPUTING</div>
+        <div class="sheet-org">Learning Management System · ${esc(rc.student.branch_name || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">STUDENT REPORT CARD</div>
+        <div class="sheet-docno">Generated on ${esc(rc.generated_on)} · ID ${esc(rc.student.username)}</div>
+      </div>
+      <div class="rc-student"><h2>${esc(rc.student.name)}</h2><span class="sheet-muted">${esc(rc.student.mobile || '')}</span></div>
+      <div class="rc-wrap">${rows}</div>
+      <div class="rc-overall">
+        <span>OVERALL: ${rc.overall ? rc.overall.pct + '%' : '—'}</span>
+        <span>GRADE: ${rc.overall ? rc.overall.grade : '—'}</span>
+        <span>REMARK: ${rc.overall ? (rc.overall.pct >= 75 ? 'EXCELLENT' : rc.overall.pct >= 60 ? 'GOOD' : rc.overall.pct >= 45 ? 'SATISFACTORY' : 'NEEDS IMPROVEMENT') : '—'}</span>
+      </div>
+      <div class="sheet-foot">
+        <div class="sheet-sign">Class Teacher</div>
+        <div class="sheet-sign">Principal</div>
+        <div class="sheet-note">VUMCA hITECH Computing<br>This is a system-generated report card.</div>
+      </div>
+    </div>`;
+}
+
+// ---------- ID card ----------
+async function loadStudentIdcard() {
+  try {
+    const ic = await api('/api/student/idcard');
+    document.getElementById('studentIdcard').innerHTML = renderStudentIdcard(ic);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderStudentIdcard(ic) {
+  return `
+    <div class="print-sheet" style="background:transparent;box-shadow:none;padding:0">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> COMPUTING</div>
+        <div class="sheet-org">${esc(ic.student.branch_name || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">STUDENT IDENTITY CARD</div>
+      </div>
+      <div class="id-card">
+        <div class="id-top">
+          <div class="id-brand">VUMCA <span class="accent">hITECH</span></div>
+          <div class="id-photo">${esc((ic.student.name || ' ')[0] || ' ')}</div>
+        </div>
+        <div class="id-name">${esc(ic.student.name)}</div>
+        <div class="id-row">
+          <div class="id-facts">
+            <div class="id-fact"><b>Student ID</b> &nbsp;${esc(ic.student.username)}</div>
+            <div class="id-fact"><b>Mobile</b> &nbsp;${esc(ic.student.mobile || '—')}</div>
+            <div class="id-fact"><b>Branch</b> &nbsp;${esc(ic.student.branch_address || '—')}</div>
+            <div class="id-fact"><b>Courses</b> &nbsp;${ic.courses.map(c => c.code).join(', ') || '—'}</div>
+          </div>
+        </div>
+        <div class="id-tag">STUDENT · VALID ${esc(ic.valid_until)}</div>
+        <div class="id-foot">
+          <span>Issued: ${esc(ic.issued_on)}</span>
+          <span>This card is the property of VUMCA hITECH Computing.</span>
+        </div>
+      </div>
+    </div>`;
 }
 
 function showModal(title, bodyHtml) {

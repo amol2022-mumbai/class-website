@@ -33,6 +33,9 @@
         <button class="nav-item" data-tab="grades"><span class="nav-icon">▦</span> Grades</button>
         <button class="nav-item" data-tab="fees"><span class="nav-icon">₿</span> Fees</button>
         <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
+        <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
+        <button class="nav-item" data-tab="reportcard"><span class="nav-icon">▤</span> Report Card</button>
+        <button class="nav-item" data-tab="idcard"><span class="nav-icon">◈</span> ID Card</button>
       </nav>
       <div class="side-footer">
         <div class="side-user">
@@ -208,6 +211,36 @@
               <tbody id="certificateRows"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- Notices -->
+      <section id="tab-notices" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Notices &amp; Announcements</h2></div>
+          <div class="notice-list" id="studentNotices"></div>
+        </div>
+      </section>
+
+      <!-- Report card -->
+      <section id="tab-reportcard" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>My Report Card</h2>
+            <button class="btn btn-ghost btn-small" onclick="window.print()">PRINT</button>
+          </div>
+          <div id="studentReportcard"><div class="empty-state" style="padding:30px"><span class="es-icon">▤</span>Loading...</div></div>
+        </div>
+      </section>
+
+      <!-- ID card -->
+      <section id="tab-idcard" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>My ID Card</h2>
+            <button class="btn btn-ghost btn-small" onclick="window.print()">PRINT</button>
+          </div>
+          <div id="studentIdcard"><div class="empty-state" style="padding:30px"><span class="es-icon">◈</span>Loading...</div></div>
         </div>
       </section>
     </main>

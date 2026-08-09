@@ -137,4 +137,14 @@ function feeSnapshot(studentId) {
   };
 }
 
-module.exports = { effectiveFee, discountAmount, discountLabel, ensureInstallments, allocatePayment, recomputeInstallments, pendingAmount, totalPaid, refreshFeeStatus, feeSnapshot, todayStr };
+// Indian Rupee formatting: 123456.5 -> "1,23,456.50"
+function inr(n) {
+  const num = round2(n);
+  const [int, dec] = String(num).split('.');
+  const last3 = int.slice(-3);
+  const rest = int.slice(0, -3);
+  const grouped = rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3;
+  return grouped + (dec !== undefined ? '.' + dec : '');
+}
+
+module.exports = { effectiveFee, discountAmount, discountLabel, ensureInstallments, allocatePayment, recomputeInstallments, pendingAmount, totalPaid, refreshFeeStatus, feeSnapshot, todayStr, inr };

@@ -20,9 +20,16 @@ try {
 const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new DatabaseSync(path.join(dataDir, 'lms.db'));
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA foreign_keys = ON');
+const mainPath = path.join(dataDir, 'lms.db');
+
+function openDatabase(p) {
+  const d = new DatabaseSync(p);
+  d.exec('PRAGMA journal_mode = WAL');
+  d.exec('PRAGMA foreign_keys = ON');
+  return d;
+}
+
+let db = openDatabase(mainPath);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS branches (
@@ -281,7 +288,69 @@ db.exec(`
     amount REAL NOT NULL,
     due_date TEXT,
     paid_amount REAL DEFAULT 0,
-    paid_at TEXT
+    paid_at TEXT,
+    last_reminder_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    install_id INTEGER,
+    student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    due_date TEXT,
+    amount REAL,
+    message TEXT,
+    channel TEXT,
+    status TEXT,
+    sent_on TEXT,
+    created_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS notices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id),
+    title TEXT NOT NULL,
+    body TEXT,
+    publish_date TEXT DEFAULT (date('now')),
+    expires_on TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS vendors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    gstin TEXT,
+    address TEXT,
+    status TEXT DEFAULT 'active'
+  );
+
+  CREATE TABLE IF NOT EXISTS vendor_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL,
+    bill_no TEXT,
+    bill_date TEXT DEFAULT (date('now')),
+    amount REAL NOT NULL,
+    gst_rate REAL DEFAULT 18,
+    input_credit REAL DEFAULT 0,
+    category TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    category TEXT,
+    tag_no TEXT,
+    cost REAL DEFAULT 0,
+    purchase_date TEXT,
+    status TEXT DEFAULT 'in-use',
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
   );
 `);
 
@@ -341,6 +410,7 @@ function migrate() {
   addCol('users', 'discount_value REAL DEFAULT 0');
   addCol('users', 'fee_installments INTEGER DEFAULT 1');
   addCol('users', 'fee_start_date TEXT');
+  addCol('installments', 'last_reminder_at TEXT');
   addCol('courses', 'branch_id INTEGER');
   addCol('payments', 'branch_id INTEGER');
 }
@@ -738,11 +808,102 @@ function seedModules() {
       }
     }
   }
+
+  // ---- Notices ----
+  if (count('notices') === 0) {
+    const insertNotice = db.prepare(
+      'INSERT INTO notices (branch_id, title, body, publish_date, expires_on) VALUES (?, ?, ?, ?, ?)'
+    );
+    const nbid = defBranchId();
+    insertNotice.run(nbid, 'Mid-Term Exam Schedule', 'Mid-term exams for CS101 and CS201 start next Monday at 9:00 AM. Carry your admit card and ID card. Reach 15 minutes early.', formatFut(-1), formatFut(14));
+    insertNotice.run(nbid, 'Fee Due Date Reminder', 'All pending installments are due by the 10th of this month. Please clear dues at the office or online to avoid late fines.', formatFut(-3), formatFut(10));
+    insertNotice.run(nbid, 'Laboratory Upgraded', 'The main computer lab now has 10 new machines with updated software. Lab timings are 9 AM - 7 PM on weekdays.', formatFut(-6), formatFut(40));
+  }
+
+  // ---- Vendors + purchases (GST input credit) ----
+  if (count('vendors') === 0) {
+    const insertVendor = db.prepare(
+      'INSERT INTO vendors (branch_id, name, phone, email, gstin, address, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const vbid = defBranchId();
+    const v1 = insertVendor.run(vbid, 'TechNova Computers', '+91 98330 11111', 'billing@technova.in', '27AABCT7562K1Z0', 'Shop 12, Lamington Road, Mumbai', 'active').lastInsertRowid;
+    const v2 = insertVendor.run(vbid, 'Office Stationery Hub', '+91 98330 22222', 'sales@os-hub.in', '27AAEFO4433L1ZQ', 'Market Yard, New Mumbai', 'active').lastInsertRowid;
+    const insertPurchase = db.prepare(
+      'INSERT INTO vendor_purchases (branch_id, vendor_id, bill_no, bill_date, amount, gst_rate, input_credit, category, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    insertPurchase.run(vbid, v1, 'TN/2026/118', formatFut(-20), 70800, 18, 10800, 'Equipment', '10 desktop computers');
+    insertPurchase.run(vbid, v1, 'TN/2026/145', formatFut(-8), 23600, 18, 3600, 'Equipment', 'Networking switch + cabling');
+    insertPurchase.run(vbid, v2, 'OSH/2026/034', formatFut(-12), 5900, 18, 900, 'Stationery', 'Printing paper and ink');
+  }
+
+  // ---- Assets ----
+  if (count('assets') === 0) {
+    const insertAsset = db.prepare(
+      'INSERT INTO assets (branch_id, name, category, tag_no, cost, purchase_date, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const abid = defBranchId();
+    insertAsset.run(abid, 'Dell Desktop (Set of 10)', 'Computer', 'EQ-001', 60000, formatFut(-20), 'in-use', 'Main lab machines');
+    insertAsset.run(abid, 'Projector Epson EB-X41', 'AV Equipment', 'AV-001', 38000, formatFut(-60), 'in-use', 'Classroom 1');
+    insertAsset.run(abid, 'Split AC 1.5T', 'Furniture & Appliances', 'AC-001', 32000, formatFut(-45), 'in-use', 'Front office');
+    insertAsset.run(abid, 'Laser Printer HP M428', 'Computer', 'EQ-002', 24500, formatFut(-30), 'in-use', 'Admin desk');
+  }
 }
 
-migrate();
-ensureBranch();
-seed();
-seedModules();
+function setup() {
+  migrate();
+  ensureBranch();
+  seed();
+  seedModules();
+}
 
-module.exports = db;
+setup();
+
+// Folds the WAL into the main file so a raw file copy of lms.db is complete.
+function checkpoint() {
+  try {
+    db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
+  } catch (_) {
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (__) {}
+  }
+}
+
+// Swaps the live database for an uploaded backup file. Validates the file is a
+// genuine LMS database, takes a safety snapshot of the current data, then closes
+// and reopens against the new file. Everything keeps working because the app
+// re-prepares statements per request.
+function replaceDatabase(uploadPath) {
+  const probe = new DatabaseSync(uploadPath);
+  const tables = probe.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','courses','payments')").all().map(r => r.name);
+  probe.close();
+  if (!tables.includes('users') || !tables.includes('courses')) {
+    throw new Error('Invalid backup: not a VUMCA LMS database (missing core tables)');
+  }
+  const stamp = Date.now();
+  const snapshot = mainPath + '.pre-restore-' + stamp;
+  checkpoint();
+  fs.renameSync(mainPath, snapshot);
+  fs.copyFileSync(uploadPath, mainPath);
+  try {
+    db.close();
+    db = openDatabase(mainPath);
+    setup();
+  } catch (e) {
+    try { db.close(); } catch (_) {}
+    fs.copyFileSync(snapshot, mainPath);
+    db = openDatabase(mainPath);
+    setup();
+    throw new Error('Restore failed, previous data preserved: ' + e.message);
+  }
+  return { ok: true };
+}
+
+// The app uses `db.prepare(...)` / `db.exec(...)` everywhere, so export a proxy
+// that always forwards to the currently-open connection (needed after restore).
+module.exports = new Proxy({}, {
+  get(target, prop) {
+    if (prop === 'replaceDatabase') return replaceDatabase;
+    if (prop === 'checkpoint') return checkpoint;
+    const value = db[prop];
+    return typeof value === 'function' ? value.bind(db) : value;
+  },
+});

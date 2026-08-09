@@ -1,4 +1,13 @@
 async function api(path, options = {}) {
+  if (options.raw) {
+    const res = await fetch(path, options);
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch (_) {}
+      throw new Error((data && data.error) || `Request failed (${res.status})`);
+    }
+    return res;
+  }
   const opts = { ...options, headers: { 'Content-Type': 'application/json' } };
   if (options.body && typeof options.body !== 'string') opts.body = JSON.stringify(options.body);
   const res = await fetch(path, opts);

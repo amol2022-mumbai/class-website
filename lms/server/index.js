@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ quiet: true });
 const express = require('express');
 const session = require('express-session');
@@ -7,11 +8,12 @@ const db = require('./db');
 const razorpay = require('./razorpay');
 const finance = require('./finance');
 const payroll = require('./payroll');
+const reminders = require('./reminders');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(express.json());
+app.use(express.json({ limit: '60mb' }));
 app.use(
   session({
     secret: 'vumca-hitech-lms-session-secret',
@@ -1693,6 +1695,485 @@ app.post('/api/payment/verify', requirePayer, async (req, res) => {
   }
 });
 
+// =====================================================================
+// ============ AUTO FEE REMINDERS + BACKUP/RESTORE + NOTICES ===========
+// =====================================================================
+
+app.get('/api/admin/reminders/status', requireAdmin, (req, res) => {
+  res.json(reminders.status());
+});
+
+app.post('/api/admin/reminders/run-now', requireAdmin, async (req, res) => {
+  try {
+    const result = await reminders.run();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/admin/reminders/log', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT r.*, u.name AS student_name, u.username
+    FROM reminders r JOIN users u ON u.id = r.student_id
+    WHERE ${branchWhere('u', bid)}
+    ORDER BY r.id DESC LIMIT 100
+  `).all(...(bid ? [bid] : [])));
+});
+
+const DB_FILE = path.join(__dirname, '..', 'data', 'lms.db');
+
+app.get('/api/admin/backup', requireAdmin, (req, res) => {
+  if (!fs.existsSync(DB_FILE)) return res.status(404).json({ error: 'Database file not found' });
+  try { db.checkpoint(); } catch (_) {}
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  res.download(DB_FILE, `vumca-backup-${stamp}.db`);
+});
+
+app.post('/api/admin/restore', requireAdmin, (req, res) => {
+  try {
+    const { data } = req.body || {};
+    if (!data) return res.status(400).json({ error: 'No backup data provided' });
+    const buf = Buffer.from(data, 'base64');
+    if (buf.length < 1000) return res.status(400).json({ error: 'Backup file too small or invalid' });
+    const tmp = path.join(__dirname, '..', 'data', 'restore-upload-' + Date.now() + '.db');
+    fs.writeFileSync(tmp, buf);
+    const result = db.replaceDatabase(tmp);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---------- Notices ----------
+app.get('/api/admin/notices', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT n.*, b.name AS branch_name FROM notices n
+    LEFT JOIN branches b ON b.id = n.branch_id
+    WHERE ${branchWhere('n', bid)}
+    ORDER BY n.publish_date DESC
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/notices', requireAdmin, (req, res) => {
+  const { title, body, publish_date, expires_on } = req.body || {};
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  const result = db.prepare(
+    'INSERT INTO notices (branch_id, title, body, publish_date, expires_on) VALUES (?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), title, body || null, publish_date || null, expires_on || null);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/notices/:id', requireAdmin, (req, res) => {
+  const notice = db.prepare('SELECT * FROM notices WHERE id = ?').get(req.params.id);
+  if (!notice) return res.status(404).json({ error: 'Notice not found' });
+  const { title, body, publish_date, expires_on } = req.body || {};
+  db.prepare('UPDATE notices SET title = ?, body = ?, publish_date = ?, expires_on = ? WHERE id = ?')
+    .run(
+      title ?? notice.title,
+      body !== undefined ? body : notice.body,
+      publish_date !== undefined ? (publish_date || null) : notice.publish_date,
+      expires_on !== undefined ? (expires_on || null) : notice.expires_on,
+      notice.id
+    );
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/notices/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM notices WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Notice not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Vendors (GST input credit) ----------
+app.get('/api/admin/vendors', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT v.*, (SELECT COALESCE(SUM(p.amount),0) FROM vendor_purchases p WHERE p.vendor_id = v.id) AS total_purchases
+    FROM vendors v WHERE ${branchWhere('v', bid)} ORDER BY v.name
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/vendors', requireAdmin, (req, res) => {
+  const { name, phone, email, gstin, address, status } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Vendor name is required' });
+  const result = db.prepare(
+    'INSERT INTO vendors (branch_id, name, phone, email, gstin, address, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), name, phone || null, email || null, gstin || null, address || null, status || 'active');
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/vendors/:id', requireAdmin, (req, res) => {
+  const vendor = db.prepare('SELECT * FROM vendors WHERE id = ?').get(req.params.id);
+  if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+  const { name, phone, email, gstin, address, status } = req.body || {};
+  db.prepare('UPDATE vendors SET name = ?, phone = ?, email = ?, gstin = ?, address = ?, status = ? WHERE id = ?')
+    .run(
+      name ?? vendor.name,
+      phone !== undefined ? phone : vendor.phone,
+      email !== undefined ? email : vendor.email,
+      gstin !== undefined ? gstin : vendor.gstin,
+      address !== undefined ? address : vendor.address,
+      status ?? vendor.status,
+      vendor.id
+    );
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/vendors/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM vendors WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Vendor not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Vendor purchases (input credit) ----------
+app.get('/api/admin/vendor-purchases', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`
+    SELECT p.*, v.name AS vendor_name, v.gstin AS vendor_gstin
+    FROM vendor_purchases p LEFT JOIN vendors v ON v.id = p.vendor_id
+    WHERE ${branchWhere('p', bid)} ORDER BY p.bill_date DESC
+  `).all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/vendor-purchases', requireAdmin, (req, res) => {
+  const { vendor_id, bill_no, bill_date, amount, gst_rate, category, note } = req.body || {};
+  if (!vendor_id || amount == null) return res.status(400).json({ error: 'Vendor and amount are required' });
+  const rate = Number(gst_rate) || 18;
+  const amt = Number(amount) || 0;
+  const inputCredit = Math.round((amt - amt / (1 + rate / 100)) * 100) / 100;
+  const result = db.prepare(
+    'INSERT INTO vendor_purchases (branch_id, vendor_id, bill_no, bill_date, amount, gst_rate, input_credit, category, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), vendor_id, bill_no || null, bill_date || null, amt, rate, inputCredit, category || null, note || null);
+  res.status(201).json({ id: result.lastInsertRowid, input_credit: inputCredit });
+});
+
+app.delete('/api/admin/vendor-purchases/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM vendor_purchases WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Purchase not found' });
+  res.json({ ok: true });
+});
+
+// ---------- Assets ----------
+app.get('/api/admin/assets', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  res.json(db.prepare(`SELECT * FROM assets WHERE ${branchWhere('assets', bid)} ORDER BY id DESC`)
+    .all(...(bid ? [bid] : [])));
+});
+
+app.post('/api/admin/assets', requireAdmin, (req, res) => {
+  const { name, category, tag_no, cost, purchase_date, status, note } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Asset name is required' });
+  const result = db.prepare(
+    'INSERT INTO assets (branch_id, name, category, tag_no, cost, purchase_date, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), name, category || null, tag_no || null, Number(cost) || 0, purchase_date || null, status || 'in-use', note || null);
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/assets/:id', requireAdmin, (req, res) => {
+  const asset = db.prepare('SELECT * FROM assets WHERE id = ?').get(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  const { name, category, tag_no, cost, purchase_date, status, note } = req.body || {};
+  db.prepare('UPDATE assets SET name = ?, category = ?, tag_no = ?, cost = ?, purchase_date = ?, status = ?, note = ? WHERE id = ?')
+    .run(
+      name ?? asset.name,
+      category !== undefined ? category : asset.category,
+      tag_no !== undefined ? tag_no : asset.tag_no,
+      cost != null ? Number(cost) : asset.cost,
+      purchase_date !== undefined ? purchase_date : asset.purchase_date,
+      status ?? asset.status,
+      note !== undefined ? note : asset.note,
+      asset.id
+    );
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/assets/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM assets WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Asset not found' });
+  res.json({ ok: true });
+});
+
+// ---------- GST summary (output invoice GST vs input credit) ----------
+app.get('/api/admin/gst-summary', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const period = req.query.month || new Date().toISOString().slice(0, 7);
+
+  const payments = db.prepare(`
+    SELECT p.*, b.gst_rate AS rate FROM payments p
+    LEFT JOIN branches b ON b.id = p.branch_id
+    WHERE ${branchWhere('p', bid)} AND substr(p.paid_at, 1, 7) = ?
+  `).all(...(bid ? [bid] : []), period);
+
+  let taxable = 0, outputGst = 0, count = 0;
+  const byRate = {};
+  for (const p of payments) {
+    const rate = Number(p.rate) || 18;
+    const t = Math.round((Number(p.amount) / (1 + rate / 100)) * 100) / 100;
+    const g = Math.round((Number(p.amount) - t) * 100) / 100;
+    taxable += t; outputGst += g; count += 1;
+    byRate[rate] = (byRate[rate] || 0) + g;
+  }
+
+  const purchases = db.prepare(`
+    SELECT * FROM vendor_purchases WHERE ${branchWhere('vendor_purchases', bid)} AND substr(bill_date, 1, 7) = ?
+  `).all(...(bid ? [bid] : []), period);
+  const inputGst = purchases.reduce((s, p) => s + (Number(p.input_credit) || 0), 0);
+
+  const netPayable = Math.round((outputGst - inputGst) * 100) / 100;
+
+  res.json({
+    period,
+    output: { invoices: count, taxable_value: Math.round(taxable * 100) / 100, gst: Math.round(outputGst * 100) / 100, by_rate: byRate },
+    input: { bills: purchases.length, input_credit: Math.round(inputGst * 100) / 100 },
+    net_payable: netPayable,
+  });
+});
+
+// ---------- Enquiry -> Student conversion ----------
+app.post('/api/admin/enquiries/:id/convert', requireAdmin, (req, res) => {
+  const enquiry = db.prepare('SELECT * FROM enquiries WHERE id = ?').get(req.params.id);
+  if (!enquiry) return res.status(404).json({ error: 'Enquiry not found' });
+  if (enquiry.status === 'enrolled') return res.status(400).json({ error: 'Enquiry is already converted' });
+
+  let seq = 0;
+  const last = db.prepare("SELECT username FROM users WHERE role = 'student' AND username LIKE 'STU%' ORDER BY username DESC LIMIT 1").get();
+  if (last) {
+    seq = Number(String(last.username).replace(/\D/g, '')) || 0;
+  }
+  const username = 'STU' + String(seq + 1).padStart(3, '0');
+  const password = 'student' + String(seq + 1);
+
+  const bid = enquiry.branch_id || activeBranch(req);
+  const studentId = db.prepare(
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run('student', username, bcrypt.hashSync(password, 10), enquiry.name, enquiry.email || null, enquiry.phone || null, 0, bid).lastInsertRowid;
+
+  if (enquiry.course_id) {
+    try {
+      db.prepare('INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)').run(studentId, enquiry.course_id);
+    } catch (_) {}
+  }
+
+  db.prepare('UPDATE enquiries SET status = ?, followup_date = NULL, notes = COALESCE(notes, ?) || ? WHERE id = ?')
+    .run('enrolled', '', ` Converted to student ${username} (${password}).`, enquiry.id);
+
+  res.status(201).json({ id: studentId, username, password });
+});
+
+// ---------- Report card + ID card ----------
+function gradeFor(pct) {
+  if (pct == null) return null;
+  if (pct >= 90) return 'A+';
+  if (pct >= 75) return 'A';
+  if (pct >= 60) return 'B';
+  if (pct >= 45) return 'C';
+  if (pct >= 35) return 'D';
+  return 'F';
+}
+
+function buildReportCard(studentId) {
+  const student = db.prepare(`
+    SELECT u.*, b.name AS branch_name, b.code AS branch_code FROM users u
+    LEFT JOIN branches b ON b.id = u.branch_id WHERE u.id = ?
+  `).get(studentId);
+  if (!student) return null;
+
+  const courses = db.prepare(`
+    SELECT c.id, c.code, c.title, c.instructor FROM enrollments e
+    JOIN courses c ON c.id = e.course_id WHERE e.student_id = ? ORDER BY c.code
+  `).all(studentId);
+
+  const rows = courses.map(c => {
+    const exams = db.prepare(`
+      SELECT x.title, x.exam_date, x.max_marks, r.marks
+      FROM exams x LEFT JOIN exam_results r ON r.exam_id = x.id AND r.student_id = ?
+      WHERE x.course_id = ? ORDER BY x.exam_date
+    `).all(studentId, c.id).map(e => ({
+      ...e, pct: e.max_marks ? Math.round((e.marks / e.max_marks) * 100) : 0,
+    }));
+
+    const att = db.prepare(`
+      SELECT COUNT(*) AS total,
+        SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present
+      FROM attendance WHERE student_id = ? AND course_id = ?
+    `).get(studentId, c.id);
+    const attPct = att.total ? Math.round((att.present / att.total) * 100) : null;
+
+    const graded = exams.filter(e => e.marks != null);
+    const examAvg = graded.length ? Math.round(graded.reduce((s, e) => s + e.pct, 0) / graded.length) : null;
+
+    const assignments = db.prepare(`
+      SELECT a.title, a.max_score, s.score, s.submitted_at
+      FROM assignments a LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ?
+      WHERE a.course_id = ? ORDER BY a.due_date
+    `).all(studentId, c.id);
+
+    const metric = examAvg != null ? examAvg : attPct;
+    return {
+      ...c,
+      exams,
+      attendance: { total: att.total, present: att.present || 0, pct: attPct },
+      exam_avg: examAvg,
+      assignments,
+      grade: gradeFor(metric),
+      remark: metric == null ? '—' : `${metric}%`,
+    };
+  });
+
+  const graded = rows.filter(r => r.grade && r.grade !== 'F');
+  const overall = graded.length ? Math.round(graded.reduce((s, r) => s + Number(r.remark.replace('%', '')), 0) / graded.length) : null;
+
+  return {
+    student: { username: student.username, name: student.name, mobile: student.mobile, branch_name: student.branch_name, branch_code: student.branch_code },
+    courses: rows,
+    overall: overall == null ? null : { pct: overall, grade: gradeFor(overall) },
+    generated_on: new Date().toISOString().slice(0, 10),
+  };
+}
+
+function buildIdCard(studentId) {
+  const student = db.prepare(`
+    SELECT u.*, b.name AS branch_name, b.address AS branch_address FROM users u
+    LEFT JOIN branches b ON b.id = u.branch_id WHERE u.id = ?
+  `).get(studentId);
+  if (!student) return null;
+  const courses = db.prepare(`
+    SELECT c.code, c.title FROM enrollments e JOIN courses c ON c.id = e.course_id
+    WHERE e.student_id = ? ORDER BY c.code
+  `).all(studentId);
+  const valid = new Date();
+  valid.setFullYear(valid.getFullYear() + 1);
+  return {
+    student: { username: student.username, name: student.name, mobile: student.mobile, branch_name: student.branch_name, branch_address: student.branch_address },
+    courses,
+    valid_until: valid.toISOString().slice(0, 10),
+    issued_on: new Date().toISOString().slice(0, 10),
+  };
+}
+
+app.get('/api/admin/students/:id/reportcard', requireAdmin, (req, res) => {
+  const card = buildReportCard(Number(req.params.id));
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+app.get('/api/admin/students/:id/idcard', requireAdmin, (req, res) => {
+  const card = buildIdCard(Number(req.params.id));
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+app.get('/api/student/reportcard', requireStudent, (req, res) => {
+  const card = buildReportCard(req.session.user.id);
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+app.get('/api/student/idcard', requireStudent, (req, res) => {
+  const card = buildIdCard(req.session.user.id);
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+app.get('/api/parent/children/:id/reportcard', requireParent, (req, res) => {
+  const childId = Number(req.params.id);
+  const linked = db.prepare('SELECT id FROM parent_students WHERE parent_id = ? AND student_id = ?').get(req.session.user.id, childId);
+  if (!linked) return res.status(403).json({ error: 'Not linked to this student' });
+  const card = buildReportCard(childId);
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+app.get('/api/parent/children/:id/idcard', requireParent, (req, res) => {
+  const childId = Number(req.params.id);
+  const linked = db.prepare('SELECT id FROM parent_students WHERE parent_id = ? AND student_id = ?').get(req.session.user.id, childId);
+  if (!linked) return res.status(403).json({ error: 'Not linked to this student' });
+  const card = buildIdCard(childId);
+  if (!card) return res.status(404).json({ error: 'Student not found' });
+  res.json(card);
+});
+
+// ---------- Notices for students/parents ----------
+app.get('/api/student/notices', requireStudent, (req, res) => {
+  const s = db.prepare('SELECT branch_id FROM users WHERE id = ?').get(req.session.user.id);
+  const rows = db.prepare(`
+    SELECT n.id, n.title, n.body, n.publish_date, n.expires_on
+    FROM notices n WHERE (n.branch_id IS NULL OR n.branch_id = ?) AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
+    ORDER BY n.publish_date DESC
+  `).all(s ? s.branch_id : null);
+  res.json(rows);
+});
+
+app.get('/api/parent/notices', requireParent, (req, res) => {
+  const rows = db.prepare(`
+    SELECT DISTINCT n.id, n.title, n.body, n.publish_date, n.expires_on
+    FROM notices n
+    JOIN parent_students ps ON 1=1
+    JOIN users s ON s.id = ps.student_id
+    WHERE ps.parent_id = ? AND (n.branch_id IS NULL OR n.branch_id = s.branch_id)
+      AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
+    ORDER BY n.publish_date DESC
+  `).all(req.session.user.id);
+  res.json(rows);
+});
+
+// ---------- Online admission (public, no auth) ----------
+app.get('/api/public/courses', (req, res) => {
+  res.json(db.prepare('SELECT c.id, c.code, c.title, c.weeks AS duration, c.level FROM courses c ORDER BY c.title').all());
+});
+
+app.post('/api/public/admission', (req, res) => {
+  const { name, phone, email, course_id, message } = req.body || {};
+  if (!name || !phone) return res.status(400).json({ error: 'Name and phone are required' });
+  const first = db.prepare('SELECT id FROM branches ORDER BY id LIMIT 1').get();
+  const result = db.prepare(
+    'INSERT INTO enquiries (branch_id, name, phone, email, course_id, source, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(first ? first.id : null, name, phone, email || null, course_id || null, 'Website', 'new', message || null);
+  res.status(201).json({ id: result.lastInsertRowid, message: 'Application received. Our team will contact you shortly.' });
+});
+
+// ---------- Dashboard charts (admin) ----------
+app.get('/api/admin/dashboard/charts', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const w = (alias) => branchWhere(alias, bid);
+  const a = bid ? [bid] : [];
+
+  const revenueByMonth = db.prepare(`
+    SELECT substr(paid_at, 1, 7) AS month, COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
+    FROM payments WHERE ${w('payments')} AND paid_at IS NOT NULL
+    GROUP BY month ORDER BY month DESC LIMIT 6
+  `).all(...a).reverse();
+
+  const feeStatus = db.prepare(`
+    SELECT u.id FROM users u WHERE u.role = 'student' AND ${w('u')}
+  `).all(...a);
+  let paid = 0, pending = 0, overdue = 0;
+  for (const s of feeStatus) {
+    const snap = finance.feeSnapshot(s.id);
+    if (!snap) continue;
+    if (snap.pending <= 0.005) paid += 1;
+    else if (snap.overdue_count > 0) overdue += 1;
+    else pending += 1;
+  }
+
+  const enquiries = db.prepare(`
+    SELECT status, COUNT(*) AS count FROM enquiries WHERE ${w('enquiries')} GROUP BY status
+  `).all(...a);
+
+  const topCourses = db.prepare(`
+    SELECT c.title, COUNT(e.id) AS students
+    FROM courses c LEFT JOIN enrollments e ON e.course_id = c.id
+    WHERE ${w('c')} GROUP BY c.id ORDER BY students DESC LIMIT 5
+  `).all(...a);
+
+  res.json({ revenue_by_month: revenueByMonth, fee_status: { paid, pending, overdue }, enquiries, top_courses: topCourses });
+});
+
 app.listen(PORT, () => {
   console.log(`VUMCA LMS running on http://localhost:${PORT}`);
 });
+
+reminders.schedule();

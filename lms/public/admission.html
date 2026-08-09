@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apply Online // VUMCA hITECH Computing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="adm-body">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="adm-card">
+    <div class="brand">
+      <span class="logo-icon">◈</span>
+      <div>
+        VUMCA <span class="accent">hITECH</span> COMPUTING
+        <small>// ONLINE ADMISSION FORM</small>
+      </div>
+    </div>
+    <div class="adm-sub">Fill this form and our counselling team will contact you</div>
+
+    <div id="alert" class="alert hidden"></div>
+
+    <form id="admForm" novalidate>
+      <div class="form-grid">
+        <div class="field span-2">
+          <label for="name">Full Name *</label>
+          <input type="text" id="name" name="name" required placeholder="e.g. Rohan Kulkarni">
+        </div>
+        <div class="field">
+          <label for="phone">Mobile Number *</label>
+          <input type="tel" id="phone" name="phone" required placeholder="+91 98xxxx xxxx">
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="you@example.com">
+        </div>
+        <div class="field span-2">
+          <label for="course">Course of Interest</label>
+          <select id="course">
+            <option value="">— Select a course (optional) —</option>
+          </select>
+        </div>
+        <div class="field span-2">
+          <label for="message">Message / Questions</label>
+          <textarea id="message" name="message" rows="3" placeholder="Any questions about course duration, timing, fees..."></textarea>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-full" id="submitBtn" style="width:100%">
+        SUBMIT APPLICATION
+      </button>
+    </form>
+
+    <p class="muted" style="text-align:center;margin-top:16px">
+      <a href="login.html" class="back-link">← Already a student? Login here</a>
+    </p>
+  </div>
+
+  <script>
+    (async function loadCourses() {
+      try {
+        const res = await fetch('/api/public/courses');
+        const courses = await res.json();
+        document.getElementById('course').innerHTML =
+          '<option value="">— Select a course (optional) —</option>' +
+          courses.map(c => `<option value="${c.id}">${c.code} — ${c.title} (${c.duration || '—'} weeks)</option>`).join('');
+      } catch (_) {}
+    })();
+
+    document.getElementById('admForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertEl = document.getElementById('alert');
+      const btn = document.getElementById('submitBtn');
+      alertEl.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'SUBMITTING...';
+      try {
+        const res = await fetch('/api/public/admission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: document.getElementById('name').value.trim(),
+            phone: document.getElementById('phone').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            course_id: document.getElementById('course').value || null,
+            message: document.getElementById('message').value.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Submission failed');
+        alertEl.innerHTML = `<strong>Application received!</strong><br>${data.message}`;
+        alertEl.classList.remove('hidden');
+        document.getElementById('admForm').reset();
+      } catch (err) {
+        alertEl.textContent = 'ERROR — ' + err.message;
+        alertEl.classList.remove('hidden');
+        alertEl.classList.add('alert-error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'SUBMIT APPLICATION';
+      }
+    });
+  </script>
+</body>
+</html>

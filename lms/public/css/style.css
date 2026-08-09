@@ -500,6 +500,69 @@ td .muted { color: var(--text-muted); font-size: 13px; }
 
 .notify-form .form-grid select[multiple] { min-height: 130px; }
 
+/* Dashboard charts */
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.chart-card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.chart-card h3 { font-family: var(--font-display); font-size: 13px; letter-spacing: 2px; color: var(--cyan); margin-bottom: 12px; }
+.bars { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding: 0 4px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.bar { width: 100%; max-width: 46px; background: linear-gradient(180deg, var(--purple), var(--cyan)); border-radius: 4px 4px 0 0; min-height: 3px; transition: height .3s; }
+.bar-lbl { font-size: 10px; color: var(--text-muted); margin-top: 6px; white-space: nowrap; }
+.bar-val { font-size: 10px; color: var(--cyan); margin-bottom: 4px; }
+.donut-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.legend { font-size: 12px; color: var(--text-muted); margin: 4px 0; }
+.legend b { color: var(--text); }
+
+/* Notice cards */
+.notice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.notice-card { background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid var(--cyan); border-radius: 8px; padding: 14px; }
+.notice-card h3 { font-family: var(--font-display); font-size: 14px; letter-spacing: 1px; color: var(--cyan); margin-bottom: 6px; }
+.notice-card .nc-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.notice-card .nc-body { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+.notice-card .nc-actions { margin-top: 10px; display: flex; gap: 8px; }
+
+/* Student / parent portals */
+.notice-list { display: flex; flex-direction: column; gap: 12px; }
+.notice-item { background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid var(--purple); border-radius: 8px; padding: 14px; }
+.notice-item h3 { font-family: var(--font-display); font-size: 14px; color: var(--purple); margin-bottom: 4px; }
+.notice-item .ni-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+.notice-item .ni-body { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+
+/* Public admission page */
+.adm-body { background: radial-gradient(1200px 600px at 50% -10%, #160b3d, #06060f 60%); min-height: 100vh; padding: 40px 16px; }
+.adm-card { max-width: 560px; margin: 0 auto; background: rgba(13, 18, 44, 0.85); border: 1px solid var(--border); border-radius: 12px; padding: 28px; box-shadow: 0 0 40px rgba(120, 80, 255, 0.15); }
+.adm-card .brand { text-align: center; margin-bottom: 6px; }
+.adm-card .adm-sub { text-align: center; font-size: 12px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; }
+
+/* ID card sheet */
+.id-card { background: #fff; color: #111; border-radius: 10px; padding: 18px; max-width: 620px; margin: 0 auto; border: 2px solid #0b1030; }
+.id-top { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0e7490; padding-bottom: 10px; margin-bottom: 12px; }
+.id-brand { font-family: var(--font-display); font-size: 20px; font-weight: 800; color: #0b1030; letter-spacing: 1px; }
+.id-brand .accent { color: #0e7490; }
+.id-photo { width: 74px; height: 84px; border: 1px solid #999; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: #f2f4f8; color: #666; font-size: 26px; font-weight: 700; }
+.id-name { font-size: 18px; font-weight: 700; color: #0b1030; margin-bottom: 2px; }
+.id-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.id-facts { flex: 1; }
+.id-fact { font-size: 12px; color: #333; padding: 3px 0; border-bottom: 1px dotted #ccc; }
+.id-fact b { color: #0b1030; }
+.id-tag { display: inline-block; background: #0b1030; color: #fff; font-size: 10px; letter-spacing: 2px; padding: 4px 10px; border-radius: 3px; margin-top: 8px; }
+.id-foot { margin-top: 12px; display: flex; justify-content: space-between; font-size: 10px; color: #666; border-top: 1px dashed #bbb; padding-top: 8px; }
+
+/* Report card sheet */
+.rc-wrap { font-size: 12px; }
+.rc-student { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 2px; }
+.rc-student h2 { font-family: var(--font-display); font-size: 18px; color: #0b1030; }
+.rc-course { border: 1px solid #ccc; border-radius: 6px; margin: 10px 0; overflow: hidden; }
+.rc-course-head { background: #0b1030; color: #fff; padding: 8px 12px; font-weight: 700; display: flex; justify-content: space-between; }
+.rc-course-head .rc-grade { color: #7ef0d0; }
+.rc-course table { width: 100%; border-collapse: collapse; }
+.rc-course th, .rc-course td { border: 1px solid #ddd; padding: 6px 8px; font-size: 11px; text-align: left; }
+.rc-course th { background: #f0f0f0; color: #222; }
+.rc-overall { display: flex; gap: 14px; justify-content: space-around; background: #eef5ff; border: 1px solid #cfe0f5; border-radius: 6px; padding: 10px; margin-top: 8px; font-weight: 700; color: #0b1030; }
+
+@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+
 @page { size: A4; margin: 10mm; }
 
 @media print {

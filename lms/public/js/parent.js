@@ -8,6 +8,8 @@ const tabTitles = {
   attendance: ['// PARENT / ATTENDANCE', 'Attendance'],
   fees: ['// PARENT / FEES', 'Fees & Payments'],
   results: ['// PARENT / RESULTS', 'Exam Results'],
+  reportcard: ['// PARENT / REPORT CARD', 'Report Card'],
+  notices: ['// PARENT / NOTICES', 'Notices & Announcements'],
 };
 
 (async function init() {
@@ -62,6 +64,8 @@ function switchTab(tab) {
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'fees') loadFees();
   else if (tab === 'results') loadResults();
+  else if (tab === 'reportcard') loadParentReportcard();
+  else if (tab === 'notices') loadParentNotices();
 }
 
 async function getDash() {
@@ -214,6 +218,61 @@ async function loadResults() {
       <td><span class="badge badge-${pct >= 70 ? 'green' : pct >= 50 ? 'yellow' : 'red'}">${pct}%</span></td>
     </tr>`;
   }).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">▤</span>No exam results published.</div></td></tr>';
+}
+
+// ---------- Report card ----------
+async function loadParentReportcard() {
+  try {
+    const rc = await api(`/api/parent/children/${selectedChildId}/reportcard`);
+    document.getElementById('parentReportcard').innerHTML = renderParentReportcard(rc);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderParentReportcard(rc) {
+  const rows = rc.courses.map(c => `
+    <div class="rc-course">
+      <div class="rc-course-head"><span>${esc(c.code)} — ${esc(c.title)} <span class="sheet-muted">(${esc(c.instructor || '—')})</span></span>
+        <span class="rc-grade">GRADE ${esc(c.grade || '—')} · ${esc(c.remark)}</span></div>
+      <table>
+        <tr><th>Exam</th><th>Date</th><th>Max Marks</th><th>Marks</th><th>%</th></tr>
+        ${c.exams.map(e => `<tr><td>${esc(e.title)}</td><td>${esc(e.exam_date || '—')}</td><td>${e.max_marks}</td><td>${e.marks != null ? e.marks : '—'}</td><td>${e.marks != null ? e.pct + '%' : '—'}</td></tr>`).join('')}
+        <tr><td colspan="5" class="sheet-muted">Attendance: ${c.attendance.present}/${c.attendance.total} (${c.attendance.pct != null ? c.attendance.pct + '%' : '—'})</td></tr>
+      </table>
+    </div>`).join('');
+  return `
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> COMPUTING</div>
+        <div class="sheet-org">Learning Management System · ${esc(rc.student.branch_name || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">STUDENT REPORT CARD</div>
+        <div class="sheet-docno">Generated on ${esc(rc.generated_on)} · ID ${esc(rc.student.username)}</div>
+      </div>
+      <div class="rc-student"><h2>${esc(rc.student.name)}</h2><span class="sheet-muted">${esc(rc.student.mobile || '')}</span></div>
+      <div class="rc-wrap">${rows}</div>
+      <div class="rc-overall">
+        <span>OVERALL: ${rc.overall ? rc.overall.pct + '%' : '—'}</span>
+        <span>GRADE: ${rc.overall ? rc.overall.grade : '—'}</span>
+      </div>
+      <div class="sheet-foot">
+        <div class="sheet-sign">Class Teacher</div>
+        <div class="sheet-sign">Principal</div>
+        <div class="sheet-note">VUMCA hITECH Computing<br>This is a system-generated report card.</div>
+      </div>
+    </div>`;
+}
+
+// ---------- Notices ----------
+async function loadParentNotices() {
+  try {
+    const notices = await api('/api/parent/notices');
+    document.getElementById('parentNotices').innerHTML = notices.length ? notices.map(n => `
+      <div class="notice-item">
+        <h3>${esc(n.title)}</h3>
+        <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
+        <div class="ni-body">${esc(n.body || '')}</div>
+      </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
+  } catch (err) { toast(err.message, true); }
 }
 
 function fmtMoney(n) {

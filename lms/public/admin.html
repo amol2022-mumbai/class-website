@@ -42,6 +42,13 @@
         <button class="nav-item" data-tab="expenses"><span class="nav-icon">◍</span> Expenses</button>
         <button class="nav-item" data-tab="certificates"><span class="nav-icon">⛁</span> Certificates</button>
         <button class="nav-item" data-tab="notifications"><span class="nav-icon">✉</span> Reminders</button>
+        <button class="nav-item" data-tab="auto-remind"><span class="nav-icon">◍</span> Auto Fee Reminders</button>
+        <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
+        <button class="nav-item" data-tab="vendors"><span class="nav-icon">₨</span> Vendors &amp; GST</button>
+        <button class="nav-item" data-tab="assets"><span class="nav-icon">▣</span> Assets</button>
+        <button class="nav-item" data-tab="reportcards"><span class="nav-icon">▤</span> Report Cards</button>
+        <button class="nav-item" data-tab="idcards"><span class="nav-icon">◈</span> ID Cards</button>
+        <button class="nav-item" data-tab="backup"><span class="nav-icon">↺</span> Backup &amp; Restore</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
         <button class="nav-item" data-tab="reports"><span class="nav-icon">▦</span> Reports</button>
       </nav>
@@ -72,6 +79,12 @@
       <!-- Dashboard -->
       <section id="tab-dashboard" class="tab-panel">
         <div class="stat-grid" id="statGrid"></div>
+        <div class="chart-grid" id="chartGrid">
+          <div class="chart-card"><h3>REVENUE (LAST 6 MONTHS)</h3><div class="bars" id="revenueBars"></div></div>
+          <div class="chart-card"><h3>FEE STATUS</h3><div class="donut-row" id="feeDonut"></div></div>
+          <div class="chart-card"><h3>ENQUIRY FUNNEL</h3><div class="donut-row" id="enquiryDonut"></div></div>
+          <div class="chart-card"><h3>TOP COURSES BY ENROLLMENT</h3><div class="donut-row" id="courseDonut"></div></div>
+        </div>
         <div class="panel">
           <div class="panel-header">
             <h2>Recent Activity</h2>
@@ -525,6 +538,165 @@
         </div>
       </section>
 
+      <!-- Auto fee reminders -->
+      <section id="tab-auto-remind" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Auto Fee Reminder Scheduler</h2>
+            <span class="badge" id="remindCfgBadge">checking...</span>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Status</label>
+              <div class="alert" id="remindStatus"></div>
+            </div>
+            <div class="field">
+              <label>Actions</label>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-purple" onclick="runRemindersNow()">RUN NOW</button>
+                <button class="btn btn-ghost" onclick="loadReminderStatus()">REFRESH</button>
+              </div>
+            </div>
+          </div>
+          <small class="muted">The scheduler runs once a day (9 AM, set <code>AUTO_REMINDER_HOUR</code> in .env to change). Every due/overdue installment is messaged to the student's mobile — at most one per installment per day. <code>REMINDER_CHANNEL</code> is fixed to WhatsApp; if Twilio is unconfigured the sends are simulated.</small>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Reminder Log</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Student</th><th>Installment</th><th>Due Date</th><th>Amount</th><th>Status</th><th>Sent On</th><th>Message</th></tr>
+              </thead>
+              <tbody id="remindLogRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Notices -->
+      <section id="tab-notices" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Notices &amp; Announcements</h2>
+            <button class="btn btn-purple btn-small" onclick="openNoticeModal()">+ ADD NOTICE</button>
+          </div>
+          <div class="notice-grid" id="noticeGrid"></div>
+        </div>
+      </section>
+
+      <!-- Vendors & GST -->
+      <section id="tab-vendors" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Vendors</h2>
+            <button class="btn btn-purple btn-small" onclick="openVendorModal()">+ ADD VENDOR</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Vendor</th><th>Contact</th><th>GSTIN</th><th>Purchases</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="vendorRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Purchases &amp; Input GST Credit</h2>
+            <button class="btn btn-purple btn-small" onclick="openPurchaseModal()">+ ADD PURCHASE</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Bill No</th><th>Vendor</th><th>Date</th><th>Amount</th><th>GST%</th><th>Input Credit</th><th>Category</th><th>Actions</th></tr></thead>
+              <tbody id="purchaseRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>GST Summary (Output vs Input Credit)</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <input type="month" id="gstMonth" value="">
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadGstSummary()">LOAD</button>
+            </div>
+          </div>
+          <div id="gstSummaryView"></div>
+        </div>
+      </section>
+
+      <!-- Assets -->
+      <section id="tab-assets" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Assets &amp; Inventory</h2>
+            <button class="btn btn-purple btn-small" onclick="openAssetModal()">+ ADD ASSET</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Asset</th><th>Category</th><th>Tag No</th><th>Cost</th><th>Purchase Date</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="assetRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Report cards -->
+      <section id="tab-reportcards" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Student Report Cards</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <select id="rcStudentSelect" style="min-width:240px"></select>
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadReportCard()">LOAD</button>
+              <button class="btn btn-ghost btn-small" onclick="printReportCard()">PRINT</button>
+            </div>
+          </div>
+          <div id="reportcardView"><div class="empty-state" style="padding:30px"><span class="es-icon">▤</span>Select a student to generate the report card.</div></div>
+        </div>
+      </section>
+
+      <!-- ID cards -->
+      <section id="tab-idcards" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Student ID Cards</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="field" style="margin:0">
+                <select id="idcStudentSelect" style="min-width:240px"></select>
+              </div>
+              <button class="btn btn-purple btn-small" onclick="loadIdCard()">LOAD</button>
+              <button class="btn btn-ghost btn-small" onclick="printIdCard()">PRINT</button>
+            </div>
+          </div>
+          <div id="idcardView"><div class="empty-state" style="padding:30px"><span class="es-icon">◈</span>Select a student to generate the ID card.</div></div>
+        </div>
+      </section>
+
+      <!-- Backup & restore -->
+      <section id="tab-backup" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Backup &amp; Restore</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label>Download Database Backup</label>
+              <p class="muted" style="margin:4px 0 10px">Download the full SQLite database (students, fees, payments, everything). Keep copies safe off-site.</p>
+              <button class="btn btn-purple" onclick="downloadBackup()">⬇ DOWNLOAD BACKUP (.db)</button>
+            </div>
+            <div class="field span-2">
+              <label>Restore From Backup</label>
+              <p class="muted" style="margin:4px 0 10px">Upload a previously downloaded .db file. The current database is snapshotted first, so you can always recover if the restore fails.</p>
+              <input type="file" id="restoreFile" accept=".db">
+              <button class="btn btn-ghost" style="margin-top:10px" onclick="restoreBackup()">RESTORE DATABASE</button>
+            </div>
+          </div>
+          <div class="alert" id="backupHint"></div>
+        </div>
+      </section>
+
       <!-- Attendance -->
       <section id="tab-attendance" class="tab-panel hidden">
         <div class="panel">
@@ -562,6 +734,9 @@
                   <option value="expenses">Expenses</option>
                   <option value="payroll">Payroll</option>
                   <option value="enquiries">Enquiries / Leads</option>
+                  <option value="reportcard">Report Cards</option>
+                  <option value="gst">GST Summary</option>
+                  <option value="assets">Assets / Inventory</option>
                 </select>
               </div>
               <button class="btn btn-purple btn-small" onclick="loadReports()">GENERATE</button>

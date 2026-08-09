@@ -86,7 +86,38 @@ Additional demo accounts: students STU002–STU007 (password `student123` /
 - **Faculty portal** — assigned courses, weekly timetable, student roster, daily
   attendance marking, and assignment grading
 - **Parent portal** — per-child overview, attendance, fees & payment history, and
-  exam results
+  exam results, report cards and notices
+- **Auto fee reminders** — a built-in daily scheduler (default 9 AM, configurable via
+  `AUTO_REMINDER_HOUR`) collects every due/overdue installment and messages the
+  student's mobile with the exact pending amount and next due date. Throttled to at
+  most one message per installment per day; a Reminder Log records every send and
+  the admin tab can run the sweep on demand ("RUN NOW")
+- **Enquiry → student conversion** — one click turns a lead into a student: it
+  creates a login, enrols them in the course of interest, and marks the enquiry
+  Enrolled
+- **Report cards** — generate a printable A4 report card per student (exam-wise
+  scores, attendance, assignment submission, per-course grade and an overall grade)
+  from the admin console or the student/parent portals; also available as a
+  "Report Cards" builder report for the whole batch
+- **Student ID cards** — printable A4 student identity cards with photo placeholder,
+  branch address, enrolled course codes and validity date; generated individually
+  in the admin console and viewable in the student portal
+- **Notices & announcements** — admins publish dated notices (with optional expiry)
+  per branch; current, unexpired notices appear in the student and parent portals
+- **Online admission form** — a public page (`admission.html`, linked from the login
+  screen) lets prospective students submit name/phone/course; submissions land in
+  the Enquiries funnel with source "Website"
+- **Backup & restore** — one-click download of the full SQLite database, and a
+  restore-from-file that validates the upload, snapshots the current database first,
+  and swaps it live without restarting
+- **Dashboard charts** — the admin dashboard now renders lightweight inline charts:
+  revenue by month, fee status (cleared/pending/overdue), the enquiry funnel and top
+  courses by enrollment
+- **Vendors & GST input credit** — maintain vendor master (with GSTIN) and record
+  purchases; each bill's input CGST/SGST credit is computed and netted against
+  output GST in a GST summary (admin tab + report) showing net payable per month
+- **Asset tracking** — register institute assets (category, tag no, cost, purchase
+  date, status) with total-value summary; also available as an Assets report
 
 ## AI quiz generation (optional)
 
@@ -127,6 +158,39 @@ SMS_TWILIO_FROM=+15551234567
   the Twilio console (Messaging → Senders) or the API returns an error and the
   reminder shows as `failed` in the log.
 - Ten-digit Indian numbers are assumed to be `+91` prefixed automatically.
+
+## Auto fee reminders (scheduler)
+
+The **Auto Fee Reminders** admin tab runs an automatic daily sweep. Every day at
+`AUTO_REMINDER_HOUR` (default 9 AM) it:
+
+1. finds all installments that are due or overdue and not yet fully paid,
+2. builds a personalised WhatsApp message (installment name, amount due, total
+   pending, next due date, days overdue),
+3. sends it via the same Twilio gateway above, and records it in the reminder log.
+
+It is throttled so each installment is messaged at most once per day, and uses the
+live Twilio gateway when configured (otherwise simulated). Use the tab's **RUN NOW**
+button to trigger a sweep immediately while testing.
+
+```env
+AUTO_REMINDER_HOUR=9   # optional, default 9
+```
+
+## Backup & restore
+
+The **Backup & Restore** admin tab downloads the full SQLite database (a single
+`.db` file — students, fees, payments, everything). Restore accepts one of those
+files: the app validates it, snapshots your current database first, and swaps it in
+live — the server keeps running and nothing needs a restart. If the upload is
+invalid, the current data is untouched.
+
+## Online admission form
+
+Open `/admission.html` (or the "Apply Online" link on the login page). Prospects
+submit name, phone, email and course of interest. The submission appears in the
+admin **Enquiries** tab with source `Website` and status `New` — from where you can
+follow up and, with one click, **convert** them into a student.
 
 ## Online fee payments (Razorpay, optional)
 

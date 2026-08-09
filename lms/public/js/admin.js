@@ -22,6 +22,13 @@ const tabTitles = {
   expenses: ['// ADMIN / EXPENSES', 'Expense Tracking'],
   certificates: ['// ADMIN / CERTIFICATES', 'Certificates'],
   notifications: ['// ADMIN / REMINDERS', 'Reminders & Notifications'],
+  'auto-remind': ['// ADMIN / AUTO REMINDERS', 'Auto Fee Reminder Scheduler'],
+  notices: ['// ADMIN / NOTICES', 'Notices & Announcements'],
+  vendors: ['// ADMIN / VENDORS', 'Vendors, Purchases & GST'],
+  assets: ['// ADMIN / ASSETS', 'Assets & Inventory'],
+  reportcards: ['// ADMIN / REPORT CARDS', 'Student Report Cards'],
+  idcards: ['// ADMIN / ID CARDS', 'Student ID Cards'],
+  backup: ['// ADMIN / BACKUP', 'Backup & Restore'],
   attendance: ['// ADMIN / ATTENDANCE', 'Attendance Tracker'],
   reports: ['// ADMIN / REPORTS', 'Report Builder'],
 };
@@ -61,6 +68,7 @@ const tabTitles = {
   document.getElementById('attDate').value = todayStr();
   document.getElementById('staffAttDate').value = todayStr();
   document.getElementById('payrollMonth').value = todayStr().slice(0, 7);
+  document.getElementById('gstMonth').value = todayStr().slice(0, 7);
 })();
 
 async function loadBranchSelect() {
@@ -116,6 +124,13 @@ function switchTab(tab) {
   else if (tab === 'expenses') loadExpenses();
   else if (tab === 'certificates') loadCertificates();
   else if (tab === 'notifications') loadNotifications();
+  else if (tab === 'auto-remind') { loadReminderStatus(); loadReminderLog(); }
+  else if (tab === 'notices') loadNotices();
+  else if (tab === 'vendors') { loadVendors(); loadPurchases(); loadGstSummary(); }
+  else if (tab === 'assets') loadAssets();
+  else if (tab === 'reportcards') { loadCardStudents('rcStudentSelect'); }
+  else if (tab === 'idcards') { loadCardStudents('idcStudentSelect'); }
+  else if (tab === 'backup') clearBackupHint();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'reports') loadReports();
 }
@@ -245,6 +260,60 @@ async function loadStats() {
       <td><span class="badge badge-${r[3]}">${r[2]}</span></td>
     </tr>
   `).join('');
+
+  try {
+    const charts = await api('/api/admin/dashboard/charts');
+    renderCharts(charts);
+  } catch (_) {}
+}
+
+function renderCharts(c) {
+  const months = c.revenue_by_month || [];
+  const max = Math.max(1, ...months.map(m => m.total));
+  document.getElementById('revenueBars').innerHTML = months.map(m => `
+    <div class="bar-col">
+      <div class="bar-val">${fmtMoney(m.total)}</div>
+      <div class="bar" style="height:${Math.round((m.total / max) * 100)}%"></div>
+      <div class="bar-lbl">${m.month.slice(2)}</div>
+    </div>
+  `).join('') || '<span class="muted">No revenue data</span>';
+
+  const fs = c.fee_status || {};
+  const fsTotal = Math.max(1, (fs.paid || 0) + (fs.pending || 0) + (fs.overdue || 0));
+  document.getElementById('feeDonut').innerHTML =
+    `<div><span class="legend"><span class="legend-dot" style="background:var(--green)"></span>Cleared <b>${fs.paid || 0}</b></span>
+     <span class="legend"><span class="legend-dot" style="background:var(--yellow)"></span>Pending <b>${fs.pending || 0}</b></span>
+     <span class="legend"><span class="legend-dot" style="background:var(--red)"></span>Overdue <b>${fs.overdue || 0}</b></span></div>
+     <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:10px">
+       ${barRow('Cleared', (fs.paid || 0) / fsTotal, 'var(--green)')}
+       ${barRow('Pending', (fs.pending || 0) / fsTotal, 'var(--yellow)')}
+       ${barRow('Overdue', (fs.overdue || 0) / fsTotal, 'var(--red)')}
+     </div>`;
+
+  const eq = c.enquiries || [];
+  const eqTotal = Math.max(1, eq.reduce((s, e) => s + e.count, 0));
+  document.getElementById('enquiryDonut').innerHTML =
+    `<div>${eq.map(e => `<span class="legend"><span class="legend-dot" style="background:var(--cyan)"></span>${esc(e.status)} <b>${e.count}</b></span>`).join('')}</div>
+     <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:10px">
+       ${eq.map(e => barRow(esc(e.status), e.count / eqTotal, 'var(--cyan)')).join('')}
+     </div>`;
+
+  const tc = c.top_courses || [];
+  const tcMax = Math.max(1, ...tc.map(t => t.students));
+  document.getElementById('courseDonut').innerHTML =
+    `<div style="flex:1">${tc.map(t => `
+       <div class="legend"><span class="legend-dot" style="background:var(--purple)"></span>${esc(t.title)} <b>${t.students}</b></div>
+     `).join('') || '<span class="muted">No enrollments</span>'}</div>
+     <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:10px">
+       ${tc.map(t => barRow(esc(t.title), t.students / tcMax, 'var(--purple)')).join('')}
+     </div>`;
+}
+
+function barRow(label, pct, color) {
+  return `<div style="font-size:11px;color:var(--text-muted)">${label}
+    <div style="height:10px;background:#0a0e22;border-radius:5px;overflow:hidden;margin-top:3px">
+      <div style="height:100%;width:${Math.round(pct * 100)}%;background:${color};border-radius:5px"></div>
+    </div></div>`;
 }
 
 // ---------- Students ----------
@@ -397,6 +466,7 @@ async function loadEnquiries() {
       <td class="muted">${esc((en.created_at || '').slice(0, 10))}</td>
       <td class="table-actions">
         <button class="btn btn-ghost btn-sm" onclick="openEnquiryModal(${en.id})">EDIT</button>
+        ${en.status !== 'enrolled' ? `<button class="btn btn-purple btn-sm" onclick="convertEnquiry(${en.id}, '${esc(en.name)}')">CONVERT</button>` : ''}
         <select class="btn btn-sm enq-status" style="padding:4px 6px;max-width:120px" onchange="setEnquiryStatus(${en.id}, this.value)">
           <option value="new" ${en.status === 'new' ? 'selected' : ''}>New</option>
           <option value="contacted" ${en.status === 'contacted' ? 'selected' : ''}>Contacted</option>
@@ -2444,6 +2514,512 @@ function exportCsv() {
 
 function fmtMoney(n) {
   return 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+}
+
+// ---------- Auto fee reminders ----------
+let reminderStatus = null;
+
+async function loadReminderStatus() {
+  try {
+    reminderStatus = await api('/api/admin/reminders/status');
+    document.getElementById('remindCfgBadge').textContent =
+      reminderStatus.configured ? 'TWILIO CONFIGURED' : 'SIMULATION MODE';
+    document.getElementById('remindCfgBadge').className =
+      'badge ' + (reminderStatus.configured ? 'badge-green' : 'badge-yellow');
+    document.getElementById('remindStatus').innerHTML =
+      `<b>Enabled:</b> ${reminderStatus.enabled ? 'YES' : 'NO'} &nbsp;|&nbsp; ` +
+      `<b>Next run:</b> ${reminderStatus.nextRun ? new Date(reminderStatus.nextRun).toLocaleString() : '—'} &nbsp;|&nbsp; ` +
+      `<b>Last run:</b> ${reminderStatus.lastRun ? new Date(reminderStatus.lastRun).toLocaleString() : 'never'} &nbsp;|&nbsp; ` +
+      `<b>Sent:</b> ${reminderStatus.sent} &nbsp;|&nbsp; ` +
+      `<b>Failed:</b> ${reminderStatus.failed} &nbsp;|&nbsp; ` +
+      `<b>Skipped:</b> ${reminderStatus.skipped}`;
+  } catch (err) { toast(err.message, true); }
+}
+
+async function runRemindersNow() {
+  try {
+    const res = await api('/api/admin/reminders/run-now', { method: 'POST' });
+    toast(`Reminder run complete: ${res.sent} sent, ${res.failed} failed, ${res.skipped} skipped`);
+    loadReminderStatus();
+    loadReminderLog();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadReminderLog() {
+  try {
+    const log = await api('/api/admin/reminders/log');
+    document.getElementById('remindLogRows').innerHTML = log.length ? log.map(r => `
+      <tr>
+        <td><span class="badge badge-cyan">${esc(r.username)}</span> ${esc(r.student_name)}</td>
+        <td class="muted">${esc(r.install_id || '—')}</td>
+        <td class="muted">${esc(r.due_date || '—')}</td>
+        <td>${fmtMoney(r.amount)}</td>
+        <td><span class="badge ${r.status === 'sent' ? 'badge-green' : 'badge-red'}">${esc(r.status)}</span></td>
+        <td class="muted">${esc(r.sent_on || '—')}</td>
+        <td class="muted" style="max-width:360px">${esc(r.message || '—')}</td>
+      </tr>`).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">◍</span>No reminders sent yet. Press RUN NOW.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Notices ----------
+let noticeCache = [];
+
+async function loadNotices() {
+  try {
+    noticeCache = await api('/api/admin/notices');
+    document.getElementById('noticeGrid').innerHTML = noticeCache.length ? noticeCache.map(n => `
+      <div class="notice-card">
+        <h3>${esc(n.title)}</h3>
+        <div class="nc-meta">Published ${esc(n.publish_date || '—')}${n.expires_on ? ' · Expires ' + esc(n.expires_on) : ''}</div>
+        <div class="nc-body">${esc(n.body || '')}</div>
+        <div class="nc-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openNoticeModal(${n.id})">EDIT</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteNotice(${n.id}, '${esc(n.title)}')">DELETE</button>
+        </div>
+      </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices yet.</div>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openNoticeModal(id) {
+  const n = noticeCache.find(x => x.id === id) || {};
+  showModal(n.id ? 'Edit Notice' : 'Add Notice', `
+    <form id="noticeForm">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Title</label>
+          <input type="text" name="title" required value="${esc(n.title || '')}" placeholder="e.g. Exam Schedule">
+        </div>
+        <div class="field span-2">
+          <label>Body</label>
+          <textarea name="body" rows="5" placeholder="Full notice text...">${esc(n.body || '')}</textarea>
+        </div>
+        <div class="field">
+          <label>Publish Date</label>
+          <input type="date" name="publish_date" value="${esc(n.publish_date || todayStr())}">
+        </div>
+        <div class="field">
+          <label>Expires On (optional)</label>
+          <input type="date" name="expires_on" value="${esc(n.expires_on || '')}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${n.id ? 'SAVE CHANGES' : 'ADD NOTICE'}</button>
+      </div>
+    </form>`);
+  document.getElementById('noticeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      title: f.get('title'), body: f.get('body'),
+      publish_date: f.get('publish_date') || null, expires_on: f.get('expires_on') || null,
+    };
+    try {
+      if (n.id) await api('/api/admin/notices/' + n.id, { method: 'PUT', body });
+      else await api('/api/admin/notices', { method: 'POST', body });
+      toast(n.id ? 'Notice updated' : 'Notice published');
+      closeModal();
+      loadNotices();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteNotice(id, title) {
+  if (!confirm(`Delete notice "${title}"?`)) return;
+  try {
+    await api('/api/admin/notices/' + id, { method: 'DELETE' });
+    toast('Notice deleted');
+    loadNotices();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Vendors ----------
+let vendorCache = [];
+
+async function loadVendors() {
+  try {
+    vendorCache = await api('/api/admin/vendors');
+    document.getElementById('vendorRows').innerHTML = vendorCache.length ? vendorCache.map(v => `
+      <tr>
+        <td><strong>${esc(v.name)}</strong><br><span class="muted">${esc(v.address || '')}</span></td>
+        <td class="muted">${esc(v.phone || '—')}<br>${esc(v.email || '')}</td>
+        <td class="muted">${esc(v.gstin || '—')}</td>
+        <td>${fmtMoney(v.total_purchases || 0)}</td>
+        <td><span class="badge ${v.status === 'active' ? 'badge-green' : 'badge-yellow'}">${esc(v.status)}</span></td>
+        <td class="table-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openVendorModal(${v.id})">EDIT</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteVendor(${v.id}, '${esc(v.name)}')">DEL</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">₨</span>No vendors yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openVendorModal(id) {
+  const v = vendorCache.find(x => x.id === id) || {};
+  showModal(v.id ? 'Edit Vendor' : 'Add Vendor', `
+    <form id="vendorForm">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Vendor Name</label>
+          <input type="text" name="name" required value="${esc(v.name || '')}">
+        </div>
+        <div class="field"><label>Phone</label><input type="text" name="phone" value="${esc(v.phone || '')}"></div>
+        <div class="field"><label>Email</label><input type="email" name="email" value="${esc(v.email || '')}"></div>
+        <div class="field span-2"><label>GSTIN</label><input type="text" name="gstin" value="${esc(v.gstin || '')}"></div>
+        <div class="field span-2"><label>Address</label><input type="text" name="address" value="${esc(v.address || '')}"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${v.id ? 'SAVE CHANGES' : 'ADD VENDOR'}</button>
+      </div>
+    </form>`);
+  document.getElementById('vendorForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = { name: f.get('name'), phone: f.get('phone'), email: f.get('email'), gstin: f.get('gstin'), address: f.get('address') };
+    try {
+      if (v.id) await api('/api/admin/vendors/' + v.id, { method: 'PUT', body });
+      else await api('/api/admin/vendors', { method: 'POST', body });
+      toast(v.id ? 'Vendor updated' : 'Vendor added');
+      closeModal();
+      loadVendors();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteVendor(id, name) {
+  if (!confirm(`Delete vendor "${name}"?`)) return;
+  try {
+    await api('/api/admin/vendors/' + id, { method: 'DELETE' });
+    toast('Vendor deleted');
+    loadVendors();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Purchases ----------
+async function loadPurchases() {
+  try {
+    const rows = await api('/api/admin/vendor-purchases');
+    document.getElementById('purchaseRows').innerHTML = rows.length ? rows.map(p => `
+      <tr>
+        <td class="muted">${esc(p.bill_no || '—')}</td>
+        <td><strong>${esc(p.vendor_name || '—')}</strong></td>
+        <td class="muted">${esc(p.bill_date || '—')}</td>
+        <td>${fmtMoney(p.amount)}</td>
+        <td>${p.gst_rate}%</td>
+        <td><span class="badge badge-cyan">${fmtMoney(p.input_credit)}</span></td>
+        <td class="muted">${esc(p.category || '—')}</td>
+        <td class="table-actions">
+          <button class="btn btn-danger btn-sm" onclick="deletePurchase(${p.id})">DEL</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">₨</span>No purchases recorded.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openPurchaseModal() {
+  showModal('Add Vendor Purchase', `
+    <form id="purchaseForm">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Vendor</label>
+          <select name="vendor_id" required>${(vendorCache || []).map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Bill No</label><input type="text" name="bill_no" placeholder="e.g. INV-104"></div>
+        <div class="field"><label>Bill Date</label><input type="date" name="bill_date" value="${todayStr()}"></div>
+        <div class="field"><label>Amount (incl. GST)</label><input type="number" name="amount" step="0.01" min="0" required></div>
+        <div class="field"><label>GST Rate (%)</label><input type="number" name="gst_rate" value="18" min="0" max="28" step="0.5"></div>
+        <div class="field"><label>Category</label><input type="text" name="category" placeholder="Equipment / Stationery / Rent"></div>
+        <div class="field span-2"><label>Note</label><input type="text" name="note"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">ADD PURCHASE</button>
+      </div>
+    </form>`);
+  document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      vendor_id: Number(f.get('vendor_id')), bill_no: f.get('bill_no'),
+      bill_date: f.get('bill_date'), amount: Number(f.get('amount')),
+      gst_rate: Number(f.get('gst_rate')), category: f.get('category'), note: f.get('note'),
+    };
+    try {
+      await api('/api/admin/vendor-purchases', { method: 'POST', body });
+      toast('Purchase added — input credit recorded');
+      closeModal();
+      loadPurchases();
+      loadGstSummary();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deletePurchase(id) {
+  if (!confirm('Delete this purchase record?')) return;
+  try {
+    await api('/api/admin/vendor-purchases/' + id, { method: 'DELETE' });
+    toast('Purchase deleted');
+    loadPurchases();
+    loadGstSummary();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- GST summary ----------
+async function loadGstSummary() {
+  try {
+    const month = document.getElementById('gstMonth').value || todayStr().slice(0, 7);
+    const g = await api('/api/admin/gst-summary?month=' + month);
+    document.getElementById('gstSummaryView').innerHTML = `
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${fmtMoney(g.output.gst)}</div><div class="stat-label">Output GST (${g.output.invoices} invoices)</div></div>
+        <div class="stat-card purple"><div class="stat-num">${fmtMoney(g.input.input_credit)}</div><div class="stat-label">Input Credit (${g.input.bills} bills)</div></div>
+        <div class="stat-card ${g.net_payable > 0 ? 'green' : 'purple'}"><div class="stat-num">${fmtMoney(g.net_payable)}</div><div class="stat-label">Net GST Payable</div></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="panel-header"><h2>Taxable Value (${month})</h2></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Output — Taxable Value</th><th>Output GST</th><th>Input Credit</th><th>Net Payable</th></tr></thead>
+          <tbody><tr>
+            <td>${fmtMoney(g.output.taxable_value)}</td>
+            <td>${fmtMoney(g.output.gst)}</td>
+            <td>${fmtMoney(g.input.input_credit)}</td>
+            <td><strong>${fmtMoney(g.net_payable)}</strong></td>
+          </tr></tbody>
+        </table></div>
+      </div>`;
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Assets ----------
+let assetCache = [];
+
+async function loadAssets() {
+  try {
+    assetCache = await api('/api/admin/assets');
+    const total = assetCache.reduce((s, a) => s + (a.cost || 0), 0);
+    document.getElementById('assetRows').innerHTML = assetCache.length ? assetCache.map(a => `
+      <tr>
+        <td><strong>${esc(a.name)}</strong><br><span class="muted">${esc(a.note || '')}</span></td>
+        <td class="muted">${esc(a.category || '—')}</td>
+        <td class="muted">${esc(a.tag_no || '—')}</td>
+        <td>${fmtMoney(a.cost)}</td>
+        <td class="muted">${esc(a.purchase_date || '—')}</td>
+        <td><span class="badge ${a.status === 'in-use' ? 'badge-green' : a.status === 'maintenance' ? 'badge-yellow' : 'badge-red'}">${esc(a.status)}</span></td>
+        <td class="table-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openAssetModal(${a.id})">EDIT</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAsset(${a.id}, '${esc(a.name)}')">DEL</button>
+        </td>
+      </tr>`).join('') + `<tr><td colspan="7" style="text-align:right"><strong>Total value: ${fmtMoney(total)}</strong></td></tr>`
+      : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▣</span>No assets registered.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openAssetModal(id) {
+  const a = assetCache.find(x => x.id === id) || {};
+  showModal(a.id ? 'Edit Asset' : 'Add Asset', `
+    <form id="assetForm">
+      <div class="form-grid">
+        <div class="field span-2"><label>Asset Name</label><input type="text" name="name" required value="${esc(a.name || '')}"></div>
+        <div class="field"><label>Category</label><input type="text" name="category" value="${esc(a.category || '')}"></div>
+        <div class="field"><label>Tag No</label><input type="text" name="tag_no" value="${esc(a.tag_no || '')}"></div>
+        <div class="field"><label>Cost (Rs.)</label><input type="number" name="cost" min="0" step="0.01" value="${a.cost || 0}"></div>
+        <div class="field"><label>Purchase Date</label><input type="date" name="purchase_date" value="${esc(a.purchase_date || '')}"></div>
+        <div class="field"><label>Status</label>
+          <select name="status">
+            <option value="in-use" ${a.status === 'in-use' ? 'selected' : ''}>In Use</option>
+            <option value="maintenance" ${a.status === 'maintenance' ? 'selected' : ''}>Maintenance</option>
+            <option value="disposed" ${a.status === 'disposed' ? 'selected' : ''}>Disposed</option>
+          </select>
+        </div>
+        <div class="field span-2"><label>Note</label><input type="text" name="note" value="${esc(a.note || '')}"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${a.id ? 'SAVE CHANGES' : 'ADD ASSET'}</button>
+      </div>
+    </form>`);
+  document.getElementById('assetForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      name: f.get('name'), category: f.get('category'), tag_no: f.get('tag_no'),
+      cost: Number(f.get('cost')), purchase_date: f.get('purchase_date'),
+      status: f.get('status'), note: f.get('note'),
+    };
+    try {
+      if (a.id) await api('/api/admin/assets/' + a.id, { method: 'PUT', body });
+      else await api('/api/admin/assets', { method: 'POST', body });
+      toast(a.id ? 'Asset updated' : 'Asset added');
+      closeModal();
+      loadAssets();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteAsset(id, name) {
+  if (!confirm(`Delete asset "${name}"?`)) return;
+  try {
+    await api('/api/admin/assets/' + id, { method: 'DELETE' });
+    toast('Asset deleted');
+    loadAssets();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Report cards ----------
+let cardStudents = [];
+
+async function loadCardStudents(selId) {
+  try {
+    cardStudents = await api('/api/admin/students');
+    document.getElementById(selId).innerHTML = cardStudents.map(s =>
+      `<option value="${s.id}">${esc(s.username)} — ${esc(s.name)}</option>`).join('');
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadReportCard() {
+  const id = document.getElementById('rcStudentSelect').value;
+  if (!id) return toast('Select a student first', true);
+  try {
+    const rc = await api('/api/admin/students/' + id + '/reportcard');
+    window._reportcard = rc;
+    document.getElementById('reportcardView').innerHTML = renderReportCard(rc);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderReportCard(rc) {
+  const rows = rc.courses.map(c => `
+    <div class="rc-course">
+      <div class="rc-course-head"><span>${esc(c.code)} — ${esc(c.title)} <span class="sheet-muted">(${esc(c.instructor || '—')})</span></span>
+        <span class="rc-grade">GRADE ${esc(c.grade || '—')} · ${esc(c.remark)}</span></div>
+      <table>
+        <tr><th>Exam</th><th>Date</th><th>Max Marks</th><th>Marks</th><th>%</th></tr>
+        ${c.exams.map(e => `<tr><td>${esc(e.title)}</td><td>${esc(e.exam_date || '—')}</td><td>${e.max_marks}</td><td>${e.marks != null ? e.marks : '—'}</td><td>${e.marks != null ? e.pct + '%' : '—'}</td></tr>`).join('')}
+        <tr><td colspan="5" class="sheet-muted">Attendance: ${c.attendance.present}/${c.attendance.total} (${c.attendance.pct != null ? c.attendance.pct + '%' : '—'}) &nbsp;·&nbsp; Assignments: ${c.assignments.filter(a => a.score != null).length}/${c.assignments.length} submitted</td></tr>
+      </table>
+    </div>`).join('');
+  return `
+    <div class="print-sheet">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> COMPUTING</div>
+        <div class="sheet-org">Learning Management System · ${esc(rc.student.branch_name || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">STUDENT REPORT CARD</div>
+        <div class="sheet-docno">Generated on ${esc(rc.generated_on)} · ID ${esc(rc.student.username)}</div>
+      </div>
+      <div class="rc-student">
+        <h2>${esc(rc.student.name)}</h2>
+        <span class="sheet-muted">${esc(rc.student.mobile || '')}</span>
+      </div>
+      <div class="rc-wrap">${rows}</div>
+      <div class="rc-overall">
+        <span>OVERALL: ${rc.overall ? rc.overall.pct + '%' : '—'}</span>
+        <span>GRADE: ${rc.overall ? rc.overall.grade : '—'}</span>
+        <span>REMARK: ${rc.overall ? (rc.overall.pct >= 75 ? 'EXCELLENT' : rc.overall.pct >= 60 ? 'GOOD' : rc.overall.pct >= 45 ? 'SATISFACTORY' : 'NEEDS IMPROVEMENT') : '—'}</span>
+      </div>
+      <div class="sheet-foot">
+        <div class="sheet-sign">Class Teacher</div>
+        <div class="sheet-sign">Principal</div>
+        <div class="sheet-note">VUMCA hITECH Computing<br>This is a system-generated report card.</div>
+      </div>
+    </div>`;
+}
+
+function printReportCard() {
+  if (!window._reportcard) return toast('Load a report card first', true);
+  window.print();
+}
+
+// ---------- ID cards ----------
+async function loadIdCard() {
+  const id = document.getElementById('idcStudentSelect').value;
+  if (!id) return toast('Select a student first', true);
+  try {
+    const ic = await api('/api/admin/students/' + id + '/idcard');
+    window._idcard = ic;
+    document.getElementById('idcardView').innerHTML = renderIdCard(ic);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderIdCard(ic) {
+  return `
+    <div class="print-sheet" style="background:transparent;box-shadow:none;padding:0">
+      <div class="sheet-head">
+        <div class="sheet-brand">VUMCA <span class="sheet-accent">hITECH</span> COMPUTING</div>
+        <div class="sheet-org">${esc(ic.student.branch_name || '')}</div>
+        <div class="sheet-rule"></div>
+        <div class="sheet-doctitle">STUDENT IDENTITY CARD</div>
+      </div>
+      <div class="id-card">
+        <div class="id-top">
+          <div class="id-brand">VUMCA <span class="accent">hITECH</span></div>
+          <div class="id-photo">${esc((ic.student.name || ' ')[0] || ' ')}</div>
+        </div>
+        <div class="id-name">${esc(ic.student.name)}</div>
+        <div class="id-row">
+          <div class="id-facts">
+            <div class="id-fact"><b>Student ID</b> &nbsp;${esc(ic.student.username)}</div>
+            <div class="id-fact"><b>Mobile</b> &nbsp;${esc(ic.student.mobile || '—')}</div>
+            <div class="id-fact"><b>Branch</b> &nbsp;${esc(ic.student.branch_address || '—')}</div>
+            <div class="id-fact"><b>Courses</b> &nbsp;${ic.courses.map(c => c.code).join(', ') || '—'}</div>
+          </div>
+        </div>
+        <div class="id-tag">STUDENT · VALID ${esc(ic.valid_until)}</div>
+        <div class="id-foot">
+          <span>Issued: ${esc(ic.issued_on)}</span>
+          <span>This card is the property of VUMCA hITECH Computing. If found, please return to the institute.</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function printIdCard() {
+  if (!window._idcard) return toast('Load an ID card first', true);
+  window.print();
+}
+
+// ---------- Backup & restore ----------
+function clearBackupHint() {
+  document.getElementById('backupHint').textContent = '';
+}
+
+async function downloadBackup() {
+  try {
+    const blob = await (await api('/api/admin/backup', { raw: true })).blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'vumca-backup-' + todayStr() + '.db';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Backup downloaded');
+  } catch (err) { toast(err.message, true); }
+}
+
+async function restoreBackup() {
+  const file = document.getElementById('restoreFile').files[0];
+  if (!file) return toast('Choose a backup .db file first', true);
+  if (!confirm('Restore will REPLACE all current data with the backup. A snapshot of the current database is taken first. Continue?')) return;
+  try {
+    const data = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(data)));
+    const res = await api('/api/admin/restore', { method: 'POST', body: { data: b64 } });
+    document.getElementById('backupHint').innerHTML = `<span style="color:var(--green)">Restore successful. The database was replaced with the backup.</span>`;
+    toast('Database restored');
+  } catch (err) {
+    document.getElementById('backupHint').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`;
+    toast('Restore failed', true);
+  }
+}
+
+// ---------- Enquiry conversion ----------
+async function convertEnquiry(id, name) {
+  if (!confirm(`Convert enquiry from "${name}" into a student? A login will be created and the enquiry marked as Enrolled.`)) return;
+  try {
+    const res = await api('/api/admin/enquiries/' + id + '/convert', { method: 'POST' });
+    toast(`Converted! Login: ${res.username} / ${res.password}`);
+    loadEnquiries();
+    loadCardStudents('rcStudentSelect');
+    loadCardStudents('idcStudentSelect');
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------- Modal helpers ----------

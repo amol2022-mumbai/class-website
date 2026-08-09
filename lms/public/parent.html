@@ -27,6 +27,8 @@
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
         <button class="nav-item" data-tab="fees"><span class="nav-icon">₿</span> Fees & Payments</button>
         <button class="nav-item" data-tab="results"><span class="nav-icon">▤</span> Exam Results</button>
+        <button class="nav-item" data-tab="reportcard"><span class="nav-icon">▦</span> Report Card</button>
+        <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
       </nav>
       <div class="side-footer">
         <div class="side-user">
@@ -109,6 +111,25 @@
               <tbody id="resultRows"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- Report card -->
+      <section id="tab-reportcard" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Report Card</h2>
+            <button class="btn btn-ghost btn-small" onclick="window.print()">PRINT</button>
+          </div>
+          <div id="parentReportcard"><div class="empty-state" style="padding:30px"><span class="es-icon">▦</span>Select a child to view the report card.</div></div>
+        </div>
+      </section>
+
+      <!-- Notices -->
+      <section id="tab-notices" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Notices &amp; Announcements</h2></div>
+          <div class="notice-list" id="parentNotices"></div>
         </div>
       </section>
     </main>

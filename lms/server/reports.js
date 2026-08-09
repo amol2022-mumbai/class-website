@@ -326,6 +326,117 @@ function expensesReport(bid) {
   };
 }
 
+function gradeFor(pct) {
+  if (pct == null) return '—';
+  if (pct >= 90) return 'A+';
+  if (pct >= 75) return 'A';
+  if (pct >= 60) return 'B';
+  if (pct >= 45) return 'C';
+  if (pct >= 35) return 'D';
+  return 'F';
+}
+
+// Per-student report card: exam average, attendance % and grade per course.
+function reportcardReport(bid) {
+  const students = db.prepare(`
+    SELECT u.id, u.username, u.name FROM users u
+    WHERE u.role = 'student' AND ${bw('u', bid)} ORDER BY u.name
+  `).all(...args(bid));
+  const rows = [];
+  for (const s of students) {
+    const courses = db.prepare(`
+      SELECT c.id, c.code, c.title FROM enrollments e JOIN courses c ON c.id = e.course_id
+      WHERE e.student_id = ? ORDER BY c.code
+    `).all(s.id);
+    for (const c of courses) {
+      const exams = db.prepare(`
+        SELECT x.max_marks, r.marks FROM exams x
+        LEFT JOIN exam_results r ON r.exam_id = x.id AND r.student_id = ?
+        WHERE x.course_id = ?
+      `).all(s.id, c.id);
+      const graded = exams.filter(e => e.marks != null);
+      const examAvg = graded.length
+        ? Math.round(graded.reduce((t, e) => t + (e.max_marks ? (e.marks / e.max_marks) * 100 : 0), 0) / graded.length)
+        : null;
+      const att = db.prepare(`
+        SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present
+        FROM attendance WHERE student_id = ? AND course_id = ?
+      `).get(s.id, c.id);
+      const attPct = att.total ? Math.round((att.present / att.total) * 100) : null;
+      const metric = examAvg != null ? examAvg : attPct;
+      rows.push([s.username, s.name, c.code, c.title,
+                 graded.length || '—', examAvg != null ? examAvg + '%' : '—',
+                 attPct != null ? attPct + '%' : '—', gradeFor(metric)]);
+    }
+  }
+  return {
+    title: 'Report Cards (All Students)',
+    summary: [
+      { label: 'Students', value: students.length },
+      { label: 'Course Enrollments', value: rows.length },
+      { label: 'Grade A or Above', value: rows.filter(r => ['A', 'A+'].includes(r[7])).length },
+    ],
+    columns: ['Student ID', 'Name', 'Course', 'Course Title', 'Exams', 'Exam Avg', 'Attendance', 'Grade'],
+    rows,
+  };
+}
+
+function gstReport(bid) {
+  const finance = require('./finance');
+  const periods = db.prepare(`
+    SELECT DISTINCT substr(paid_at, 1, 7) AS month FROM payments
+    WHERE ${bw('payments', bid)} AND paid_at IS NOT NULL ORDER BY month
+  `).all(...args(bid));
+  const rows = [];
+  let totalOut = 0, totalInput = 0;
+  for (const p of periods) {
+    const payments = db.prepare(`
+      SELECT p.amount, b.gst_rate AS rate FROM payments p
+      LEFT JOIN branches b ON b.id = p.branch_id
+      WHERE ${bw('p', bid)} AND substr(p.paid_at, 1, 7) = ?
+    `).all(...args(bid), p.month);
+    let out = 0;
+    for (const pm of payments) {
+      const rate = Number(pm.rate) || 18;
+      out += Math.round((Number(pm.amount) - Number(pm.amount) / (1 + rate / 100)) * 100) / 100;
+    }
+    const input = db.prepare(`
+      SELECT COALESCE(SUM(input_credit), 0) AS c FROM vendor_purchases
+      WHERE ${bw('vendor_purchases', bid)} AND substr(bill_date, 1, 7) = ?
+    `).get(...args(bid), p.month).c;
+    totalOut += out; totalInput += input;
+    rows.push([p.month, payments.length, formatMoney(out), formatMoney(input), formatMoney(out - input)]);
+  }
+  return {
+    title: 'GST Summary (Output vs Input Credit)',
+    summary: [
+      { label: 'Output GST', value: formatMoney(totalOut) },
+      { label: 'Input Credit', value: formatMoney(totalInput) },
+      { label: 'Net Payable', value: formatMoney(totalOut - totalInput) },
+    ],
+    columns: ['Month', 'Invoices', 'Output GST', 'Input Credit', 'Net Payable'],
+    rows,
+  };
+}
+
+function assetsReport(bid) {
+  const rows = db.prepare(`
+    SELECT a.name, a.category, a.tag_no, a.cost, a.purchase_date, a.status
+    FROM assets a WHERE ${bw('a', bid)} ORDER BY a.category, a.name
+  `).all(...args(bid));
+  const totalValue = rows.reduce((s, r) => s + (r.cost || 0), 0);
+  return {
+    title: 'Asset / Inventory Report',
+    summary: [
+      { label: 'Assets', value: rows.length },
+      { label: 'Total Value', value: formatMoney(totalValue) },
+      { label: 'In Use', value: rows.filter(r => r.status === 'in-use').length },
+    ],
+    columns: ['Asset', 'Category', 'Tag No', 'Cost', 'Purchase Date', 'Status'],
+    rows: rows.map(r => [r.name, r.category || '—', r.tag_no || '—', formatMoney(r.cost), r.purchase_date || '—', r.status]),
+  };
+}
+
 function formatMoney(n) {
   return 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
@@ -344,6 +455,9 @@ const builders = {
   expenses: expensesReport,
   payroll: payrollReport,
   enquiries: enquiriesReport,
+  reportcard: reportcardReport,
+  gst: gstReport,
+  assets: assetsReport,
 };
 
 module.exports = { builders, formatMoney };
