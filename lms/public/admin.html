@@ -28,6 +28,7 @@
         <button class="nav-item" data-tab="enquiries"><span class="nav-icon">⚑</span> Enquiries</button>
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> Courses</button>
+        <button class="nav-item" data-tab="syllabus"><span class="nav-icon">▦</span> Syllabus</button>
         <button class="nav-item" data-tab="enrollments"><span class="nav-icon">⇄</span> Enrollments</button>
         <button class="nav-item" data-tab="batches"><span class="nav-icon">⧉</span> Batches & Timetable</button>
         <button class="nav-item" data-tab="faculty"><span class="nav-icon">✦</span> Faculty</button>
@@ -46,6 +47,7 @@
         <button class="nav-item" data-tab="notices"><span class="nav-icon">⚑</span> Notices</button>
         <button class="nav-item" data-tab="vendors"><span class="nav-icon">₨</span> Vendors &amp; GST</button>
         <button class="nav-item" data-tab="assets"><span class="nav-icon">▣</span> Assets</button>
+        <button class="nav-item" data-tab="inventory"><span class="nav-icon">≋</span> Inventory</button>
         <button class="nav-item" data-tab="library"><span class="nav-icon">▤</span> Library</button>
         <button class="nav-item" data-tab="transport"><span class="nav-icon">⧉</span> Transport</button>
         <button class="nav-item" data-tab="broadcasts"><span class="nav-icon">✉</span> Broadcasts</button>
@@ -89,6 +91,9 @@
           <div class="chart-card"><h3>FEE STATUS</h3><div class="donut-row" id="feeDonut"></div></div>
           <div class="chart-card"><h3>ENQUIRY FUNNEL</h3><div class="donut-row" id="enquiryDonut"></div></div>
           <div class="chart-card"><h3>TOP COURSES BY ENROLLMENT</h3><div class="donut-row" id="courseDonut"></div></div>
+          <div class="chart-card"><h3>ATTENDANCE (LAST 30 DAYS)</h3><div class="bars" id="attendanceBars"></div></div>
+          <div class="chart-card"><h3>INCOME VS EXPENSE</h3><div class="donut-row" id="incomeExpenseDonut"></div></div>
+          <div class="chart-card"><h3>ACADEMIC PERFORMANCE</h3><div class="donut-row" id="academicDonut"></div></div>
         </div>
         <div class="panel">
           <div class="panel-header">
@@ -182,6 +187,27 @@
                 </tr>
               </thead>
               <tbody id="courseRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Syllabus -->
+      <section id="tab-syllabus" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Course Syllabus</h2>
+            <div class="panel-tools">
+              <select id="syllabusCourseFilter" class="input input-sm" onchange="loadSyllabus()">
+                <option value="">All Courses</option>
+              </select>
+              <button class="btn btn-purple btn-small" onclick="openSyllabusModal()">+ ADD WEEK</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Course</th><th>Week</th><th>Topic</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="syllabusRows"></tbody>
             </table>
           </div>
         </div>
@@ -366,7 +392,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Title</th><th>Course</th><th>Date</th><th>Max Marks</th><th>Paper</th><th>Results</th><th>Actions</th></tr>
+                <tr><th>Title</th><th>Course</th><th>Date</th><th>Window</th><th>Max Marks</th><th>Paper</th><th>Results</th><th>Actions</th></tr>
               </thead>
               <tbody id="examRows"></tbody>
             </table>
@@ -649,6 +675,34 @@
             <table>
               <thead><tr><th>Asset</th><th>Category</th><th>Tag No</th><th>Cost</th><th>Purchase Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody id="assetRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Inventory -->
+      <section id="tab-inventory" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Inventory Items</h2>
+            <button class="btn btn-purple btn-small" onclick="openInventoryModal()">+ ADD ITEM</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>Category</th><th>SKU</th><th>Qty</th><th>Unit</th><th>Cost</th><th>Reorder Lvl</th><th>Actions</th></tr></thead>
+              <tbody id="inventoryRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Stock Transactions</h2>
+            <button class="btn btn-purple btn-small" onclick="openTransactModal()">+ RECORD MOVEMENT</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Change</th><th>Note</th></tr></thead>
+              <tbody id="inventoryTxRows"></tbody>
             </table>
           </div>
         </div>

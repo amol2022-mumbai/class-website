@@ -4,6 +4,7 @@ let activeQuiz = null;
 const tabTitles = {
   dashboard: ['// STUDENT / OVERVIEW', 'My Dashboard'],
   courses: ['// STUDENT / COURSES', 'My Courses'],
+  syllabus: ['// STUDENT / SYLLABUS', 'Course Syllabus'],
   timetable: ['// STUDENT / TIMETABLE', 'Weekly Timetable'],
   assignments: ['// STUDENT / ASSIGNMENTS', 'Assignments'],
   quizzes: ['// STUDENT / QUIZZES', 'Quizzes'],
@@ -43,6 +44,7 @@ function switchTab(tab) {
 
   if (tab === 'dashboard') loadDashboard();
   else if (tab === 'courses') loadCourses();
+  else if (tab === 'syllabus') loadStudentSyllabus();
   else if (tab === 'timetable') loadTimetable();
   else if (tab === 'assignments') loadAssignments();
   else if (tab === 'quizzes') loadQuizzes();
@@ -119,6 +121,28 @@ async function loadCourses() {
   `).join('') : '<div class="empty-state"><span class="es-icon">⬡</span>No courses enrolled.</div>';
 }
 
+// ---------- Syllabus ----------
+async function loadStudentSyllabus() {
+  try {
+    const rows = await api('/api/student/syllabus');
+    const filter = document.getElementById('studentSyllabusFilter');
+    const current = Number(filter.value) || 0;
+    const courses = [...new Map(rows.map(s => [s.course_id, { id: s.course_id, code: s.course_code, title: s.course_title }])).values()];
+    filter.innerHTML = '<option value="">All Courses</option>' + courses.map(c =>
+      `<option value="${c.id}">${esc(c.code)} — ${esc(c.title)}</option>`).join('');
+    filter.value = current;
+
+    const list = rows.filter(s => !current || s.course_id === current);
+    document.getElementById('studentSyllabusRows').innerHTML = list.length ? list.map(s => `
+      <tr>
+        <td><span class="badge badge-cyan">${esc(s.course_code)}</span><div class="muted">${esc(s.course_title)}</div></td>
+        <td><strong>Week ${s.week_no}</strong></td>
+        <td><strong>${esc(s.topic)}</strong>${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}</td>
+        <td class="muted">${esc(s.objectives || '—')}</td>
+      </tr>`).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">▦</span>No syllabus published for your courses yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
 async function loadTimetable() {
   const timetable = await api('/api/student/timetable');
   document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
@@ -143,9 +167,17 @@ async function loadExams() {
         : '<span class="badge badge-yellow">PENDING</span>';
     const paper = x.question_count > 0
       ? (x.marks != null
-          ? `<span class="muted">${x.question_count} Q${x.duration_minutes ? ' · ' + x.duration_minutes + ' min' : ''}</span>`
-          : `<button class="btn btn-purple btn-sm" onclick="startExam(${x.id}, '${esc(x.title)}')">TAKE EXAM</button>`)
+          ? `<button class="btn btn-ghost btn-sm" onclick="viewExamResult(${x.id})">VIEW RESULT</button> <span class="muted">${x.question_count} Q${x.duration_minutes ? ' · ' + x.duration_minutes + ' min' : ''}</span>`
+          : (x.state === 'available'
+              ? `<button class="btn btn-purple btn-sm" onclick="startExam(${x.id}, '${esc(x.title)}')">TAKE EXAM</button>`
+              : '<span class="muted">—</span>'))
       : '<span class="muted">—</span>';
+    const stateBadge = {
+      submitted: '<span class="badge badge-green">SUBMITTED</span>',
+      scheduled: '<span class="badge badge-yellow">SCHEDULED</span>',
+      closed: '<span class="badge badge-red">CLOSED</span>',
+      available: '<span class="badge badge-cyan">OPEN</span>',
+    }[x.state] || '<span class="badge badge-cyan">OPEN</span>';
     return `
     <tr>
       <td><strong>${esc(x.title)}</strong></td>
@@ -154,8 +186,9 @@ async function loadExams() {
       <td>${x.max_marks}</td>
       <td>${paper}</td>
       <td>${resultBadge}</td>
+      <td>${stateBadge}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled in your courses.</div></td></tr>';
+  }).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▤</span>No exams scheduled in your courses.</div></td></tr>';
 }
 
 let examTimer = null;
@@ -236,6 +269,53 @@ function cancelExam() {
   closeModal();
 }
 
+async function viewExamResult(id) {
+  try {
+    const d = await api('/api/student/exams/' + id + '/result');
+    const r = d.result;
+    const pct = r.percentage;
+    const grade = pct >= 70 ? 'badge-green' : pct >= 50 ? 'badge-yellow' : 'badge-red';
+    const rankLine = r.total_takers > 0
+      ? `Rank <strong>#${r.rank}</strong> of ${r.total_takers} students · top ${r.percentile}%`
+      : 'First attempt recorded';
+    showModal('Result: ' + esc(d.exam.title), `
+      <div class="result-hero" style="text-align:center;padding:10px 0 6px">
+        <div style="font-size:42px;font-weight:800">${r.marks}<span style="font-size:20px;color:var(--text-dim)">/${r.total}</span></div>
+        <div><span class="badge ${grade}" style="font-size:13px">${pct}%</span></div>
+        <div class="muted" style="margin-top:6px">${rankLine}</div>
+      </div>
+      <div class="alert alert-info" style="margin:12px 0">
+        ${esc(d.exam.course_title)} — ${d.review.length} questions · ${r.submitted_at ? 'Submitted ' + esc((r.submitted_at || '').slice(0, 10)) : ''}
+      </div>
+      <div id="resultReview"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-purple" onclick="closeModal()">CLOSE</button>
+      </div>
+    `);
+    const wrap = document.getElementById('resultReview');
+    wrap.innerHTML = d.review.map(q => {
+      const chosenLabel = q.chosen != null ? `${String.fromCharCode(65 + q.chosen)}. ${esc(q.options[q.chosen] || '')}` : '<em class="muted">Not answered</em>';
+      const correctLabel = `${String.fromCharCode(65 + q.correct_index)}. ${esc(q.options[q.correct_index] || '')}`;
+      const icon = q.correct ? '&#10003;' : '&#10007;';
+      const cls = q.correct ? 'review-correct' : 'review-wrong';
+      return `
+        <div class="quiz-question ${cls}">
+          <div class="qq-text">${icon} Q${q.index}. ${esc(q.text)} <span class="badge badge-purple" style="margin-left:6px">${q.marks} mark${q.marks !== 1 ? 's' : ''}</span> ${q.correct ? '<span class="badge badge-green" style="float:right">CORRECT</span>' : '<span class="badge badge-red" style="float:right">INCORRECT</span>'}</div>
+          <div class="qq-options" style="margin-top:6px">
+            ${q.options.map((opt, oi) => {
+              let tag = '';
+              if (oi === q.correct_index) tag = '<span class="badge badge-green" style="margin-left:6px">ANSWER</span>';
+              else if (oi === q.chosen) tag = '<span class="badge badge-red" style="margin-left:6px">YOURS</span>';
+              return `<div class="qq-option${oi === q.correct_index ? ' review-answer' : (oi === q.chosen ? ' review-chosen' : '')}" style="display:block;width:100%">${String.fromCharCode(65 + oi)}. ${esc(opt)}${tag}</div>`;
+            }).join('')}
+          </div>
+          ${q.chosen != null && !q.correct ? `<div class="muted" style="margin-top:6px">You chose: ${chosenLabel} · Correct: ${correctLabel}</div>` : ''}
+        </div>`;
+    }).join('');
+    wrap.scrollTop = 0;
+  } catch (err) { toast(err.message, true); }
+}
+
 async function loadFees() {
   const d = await api('/api/student/fees');
   const overdueBanner = d.overdue_count > 0 ? `
@@ -277,8 +357,49 @@ async function loadFees() {
       <td class="muted">${esc(p.method || '')}</td>
       <td class="muted">${esc(p.note || '—')}</td>
       <td><strong>${fmtMoney(p.amount)}</strong></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="viewReceipt(${p.id})">RECEIPT</button></td>
     </tr>
-  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded. See the office if you have paid.</div></td></tr>';
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">₿</span>No payments recorded. See the office if you have paid.</div></td></tr>';
+}
+
+async function viewReceipt(id) {
+  try {
+    const d = await api('/api/student/payments/' + id + '/receipt');
+    const p = d.payment, b = d.branch || {};
+    const courses = (d.courses || []).map(c => `${esc(c.code)} — ${esc(c.title)}`).join('<br>') || '<span class="muted">—</span>';
+    showModal('Payment Receipt', `
+      <div style="text-align:center;padding:18px;border:1px solid var(--border);border-radius:12px;background:var(--bg-elevated)">
+        <div style="font-family:var(--font-display);font-size:18px;color:var(--cyan);font-weight:700">VUMCA hITECH Computing</div>
+        <div class="muted" style="font-size:12px">${esc(b.name || '')}${b.address ? ' · ' + esc(b.address) : ''}</div>
+        <div class="muted" style="font-size:11px;margin-top:6px">${esc(b.gstin ? 'GSTIN: ' + b.gstin : '')}</div>
+        <hr style="border-color:var(--border);margin:12px 0">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span class="muted">RECEIPT NO.</span><strong>${esc(p.receipt_no)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span class="muted">STUDENT</span><strong>${esc(p.student_name)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span class="muted">COURSES</span><span style="text-align:right">${courses}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span class="muted">PAID ON</span><strong>${esc(p.paid_at || '')}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span class="muted">METHOD</span><strong>${esc((p.method || '').toUpperCase())}</strong>
+        </div>
+        <hr style="border-color:var(--border);margin:12px 0">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="muted">AMOUNT PAID</span>
+          <strong style="font-size:22px;color:var(--green)">${fmtMoney(p.amount)}</strong>
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top:14px">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CLOSE</button>
+        <button type="button" class="btn btn-purple" onclick="window.print()">PRINT</button>
+      </div>
+    `);
+  } catch (err) { toast(err.message, true); }
 }
 
 function loadRazorpay() {
@@ -355,9 +476,12 @@ async function loadAssignments() {
       : overdue
         ? '<span class="badge badge-red">OVERDUE</span>'
         : '<span class="badge badge-yellow">PENDING</span>';
+    const title = `${esc(a.title)}${a.has_attachment ? ' <span class="badge badge-cyan" title="Download attached material">FILE</span>' : ''}`;
     return `
     <tr>
-      <td><strong>${esc(a.title)}</strong><div class="muted">${esc(a.description || '')}</div></td>
+      <td><strong>${title}</strong><div class="muted">${esc(a.description || '')}</div>
+        ${a.has_attachment ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="downloadAssignmentFile(${a.id})">DOWNLOAD MATERIAL</button>` : ''}
+      </td>
       <td><span class="badge badge-cyan">${esc(a.course_code)}</span></td>
       <td class="muted">${esc(a.due_date || '—')}</td>
       <td>${a.max_score}</td>
@@ -371,6 +495,13 @@ async function loadAssignments() {
   }).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">✎</span>No assignments in your courses.</div></td></tr>';
 }
 
+async function downloadAssignmentFile(id) {
+  try {
+    const a = await api('/api/student/assignments/' + id + '/attachment');
+    downloadFromB64(a.name, a.data);
+  } catch (err) { toast(err.message, true); }
+}
+
 function viewSubmission(assignment) {
   showModal(assignment.title + ' — Submission', `
     <p class="muted" style="margin-bottom:14px">Submitted on <strong>${esc(assignment.submitted || '')}</strong></p>
@@ -378,10 +509,23 @@ function viewSubmission(assignment) {
       <label>Your Submission</label>
       <textarea rows="6" readonly style="background:var(--bg-elevated)">${esc(assignment.content || '')}</textarea>
     </div>
+    ${assignment.my_attachment
+      ? `<div class="field">
+          <label>Attached File</label>
+          <div><button class="btn btn-ghost btn-sm" onclick="downloadMySubmission(${assignment.id}, ${assignment.my_submission_id})">DOWNLOAD ${esc(assignment.attachment_name)}</button></div>
+        </div>`
+      : ''}
     <div class="alert ${assignment.score != null ? 'alert-success' : ''}" style="margin-bottom:0">
       ${assignment.score != null ? `GRADE: <strong>${assignment.score} / ${assignment.max_score}</strong>` : 'Awaiting grading by your instructor.'}
     </div>
   `);
+}
+
+async function downloadMySubmission(assignmentId, submissionId) {
+  try {
+    const s = await api(`/api/student/submissions/${submissionId}/attachment`);
+    downloadFromB64(s.name, s.data);
+  } catch (err) { toast(err.message, true); }
 }
 
 function submitAssignment(assignment) {
@@ -389,7 +533,12 @@ function submitAssignment(assignment) {
     <form id="submitForm">
       <div class="field">
         <label>Your Work</label>
-        <textarea name="content" rows="8" required placeholder="Paste your solution / write a summary of your submission..."></textarea>
+        <textarea name="content" rows="8" placeholder="Paste your solution / write a summary of your submission..."></textarea>
+      </div>
+      <div class="field">
+        <label>Attach a file (optional)</label>
+        <input type="file" id="submitFile">
+        <span class="muted" style="font-size:11px">PDF, images or documents</span>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
@@ -399,14 +548,17 @@ function submitAssignment(assignment) {
   `);
   document.getElementById('submitForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try {
-      await api(`/api/student/assignments/${assignment.id}/submit`, {
-        method: 'POST', body: { content: e.target.content.value },
-      });
-      toast('Assignment submitted');
-      closeModal();
-      loadAssignments();
-    } catch (err) { toast(err.message, true); }
+    const fileEl = document.getElementById('submitFile');
+    fileToBase64(fileEl.files[0], async (file) => {
+      try {
+        const body = { content: e.target.content.value || '' };
+        if (file) { body.attachment_name = file.name; body.attachment_data = file.data; }
+        await api(`/api/student/assignments/${assignment.id}/submit`, { method: 'POST', body });
+        toast('Assignment submitted');
+        closeModal();
+        loadAssignments();
+      } catch (err) { toast(err.message, true); }
+    });
   });
 }
 
@@ -547,7 +699,15 @@ async function loadStudentNotices() {
         <h3>${esc(n.title)}</h3>
         <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
         <div class="ni-body">${esc(n.body || '')}</div>
+        ${n.has_attachment ? `<div style="margin-top:10px"><button class="btn btn-purple btn-sm" onclick="downloadCircular(${n.id})">DOWNLOAD CIRCULAR (${esc(n.attachment_name || 'PDF')})</button></div>` : ''}
       </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
+  } catch (err) { toast(err.message, true); }
+}
+
+async function downloadCircular(id) {
+  try {
+    const n = await api('/api/student/notices/' + id + '/attachment');
+    downloadFromB64(n.name, n.data);
   } catch (err) { toast(err.message, true); }
 }
 

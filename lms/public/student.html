@@ -25,6 +25,7 @@
       <nav class="side-nav" id="sideNav">
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> My Courses</button>
+        <button class="nav-item" data-tab="syllabus"><span class="nav-icon">▦</span> Syllabus</button>
         <button class="nav-item" data-tab="timetable"><span class="nav-icon">⧉</span> Timetable</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Assignments</button>
         <button class="nav-item" data-tab="quizzes"><span class="nav-icon">◎</span> Quizzes</button>
@@ -74,6 +75,24 @@
         </div>
       </section>
 
+      <!-- Syllabus -->
+      <section id="tab-syllabus" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Course Syllabus</h2>
+            <select class="input input-sm" id="studentSyllabusFilter" onchange="loadSyllabus()">
+              <option value="">All Courses</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Course</th><th>Week</th><th>Topic</th><th>Objectives</th></tr></thead>
+              <tbody id="studentSyllabusRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Timetable -->
       <section id="tab-timetable" class="tab-panel hidden">
         <div class="panel">
@@ -98,8 +117,7 @@
               <thead>
                 <tr><th>Title</th><th>Course</th><th>Due</th><th>Max Score</th><th>Status</th><th>Action</th></tr>
               </thead>
-              <tbody id="assignmentRows"></tbody>
-            </table>
+              <tbody id="assignmentRows"></tbody>            </table>
           </div>
         </div>
       </section>
@@ -126,7 +144,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Exam</th><th>Course</th><th>Date</th><th>Max Marks</th><th>Paper</th><th>Result</th></tr>
+                <tr><th>Exam</th><th>Course</th><th>Date</th><th>Max Marks</th><th>Paper</th><th>Result</th><th>Status</th></tr>
               </thead>
               <tbody id="examRows"></tbody>
             </table>
@@ -194,7 +212,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Receipt</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th></tr>
+                <tr><th>Receipt</th><th>Date</th><th>Method</th><th>Note</th><th>Amount</th><th>Action</th></tr>
               </thead>
               <tbody id="paymentRows"></tbody>
             </table>

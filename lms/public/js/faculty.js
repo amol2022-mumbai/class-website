@@ -5,6 +5,7 @@ let gradingAssignmentId = null;
 const tabTitles = {
   dashboard: ['// FACULTY / OVERVIEW', 'My Dashboard'],
   courses: ['// FACULTY / COURSES', 'My Courses'],
+  syllabus: ['// FACULTY / SYLLABUS', 'Syllabus Progress'],
   timetable: ['// FACULTY / TIMETABLE', 'Weekly Timetable'],
   students: ['// FACULTY / STUDENTS', 'Student Roster'],
   attendance: ['// FACULTY / ATTENDANCE', 'Attendance Tracker'],
@@ -45,6 +46,7 @@ function switchTab(tab) {
 
   if (tab === 'dashboard') loadDashboard();
   else if (tab === 'courses') loadCourses();
+  else if (tab === 'syllabus') loadFacultySyllabus();
   else if (tab === 'timetable') loadTimetable();
   else if (tab === 'students') loadRoster();
   else if (tab === 'attendance') loadAttendance();
@@ -77,6 +79,57 @@ async function loadCourses() {
   ).join('');
   rosterSel.innerHTML = '<option value="">Select course...</option>' + opts;
   attSel.innerHTML = '<option value="">Select course...</option>' + opts;
+}
+
+// ---------- Syllabus ----------
+async function loadFacultySyllabus() {
+  try {
+    const rows = await api('/api/faculty/syllabus');
+    const filter = document.getElementById('facultySyllabusFilter');
+    const current = Number(filter.value) || 0;
+    const courses = [...new Map(rows.map(s => [s.course_id, { id: s.course_id, code: s.course_code, title: s.course_title }])).values()];
+    filter.innerHTML = '<option value="">All Courses</option>' + courses.map(c =>
+      `<option value="${c.id}">${esc(c.code)} — ${esc(c.title)}</option>`).join('');
+    filter.value = current;
+
+    const list = rows.filter(s => !current || s.course_id === current);
+    document.getElementById('facultySyllabusRows').innerHTML = list.length ? list.map(s => `
+      <tr>
+        <td><span class="badge badge-cyan">${esc(s.course_code)}</span><div class="muted">${esc(s.course_title)}</div></td>
+        <td><strong>Week ${s.week_no}</strong></td>
+        <td><strong>${esc(s.topic)}</strong>${s.objectives ? `<div class="muted">${esc(s.objectives)}</div>` : ''}${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}</td>
+        <td><span class="badge ${s.status === 'completed' ? 'badge-green' : s.status === 'in-progress' ? 'badge-yellow' : 'badge-cyan'}">${esc(s.status)}</span></td>
+        <td><button class="btn btn-purple btn-sm" onclick="updateSyllabusStatus(${s.id})">UPDATE PROGRESS</button></td>
+      </tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">▦</span>No syllabus published for your courses yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function updateSyllabusStatus(id) {
+  showModal('Update Syllabus Progress', `
+    <form id="syllabusStatusForm">
+      <div class="field">
+        <label>Status</label>
+        <select name="status">
+          <option value="planned">Planned</option>
+          <option value="in-progress">In Progress</option>
+          <option value="completed">Completed</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">SAVE</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('syllabusStatusForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/faculty/syllabus/' + id, { method: 'PUT', body: { status: e.target.status.value } });
+      toast('Syllabus progress updated');
+      closeModal();
+      loadFacultySyllabus();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 async function loadDashboard() {
@@ -215,13 +268,22 @@ async function loadAssignments() {
   }
   document.getElementById('assignmentRows').innerHTML = rows.length ? rows.map(a => `
     <tr>
-      <td><strong>${esc(a.title)}</strong><div class="muted">${esc(a.description || '')}</div></td>
+      <td><strong>${esc(a.title)}</strong><div class="muted">${esc(a.description || '')}</div>
+        ${a.has_attachment ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="downloadAssignmentFile(${a.id})">DOWNLOAD MATERIAL</button>` : ''}
+      </td>
       <td><span class="badge badge-cyan">${esc(a.course_code)}</span></td>
       <td class="muted">${esc(a.due_date || '—')}</td>
       <td><span class="badge badge-purple">${a.max_score} pts</span></td>
       <td><button class="btn btn-purple btn-sm" onclick="showSubmissions(${a.id}, '${esc(a.title)}')">GRADE</button></td>
     </tr>
   `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">✎</span>No assignments in your courses.</div></td></tr>';
+}
+
+async function downloadAssignmentFile(id) {
+  try {
+    const a = await api('/api/faculty/assignments/' + id + '/attachment');
+    downloadFromB64(a.name, a.data);
+  } catch (err) { toast(err.message, true); }
 }
 
 async function showSubmissions(id, title) {
@@ -233,6 +295,9 @@ async function showSubmissions(id, title) {
     <tr>
       <td><strong>${esc(s.student_name)}</strong> <span class="muted">(${esc(s.username)})</span></td>
       <td class="muted">${esc(s.content || '—')}</td>
+      <td>${s.has_attachment
+        ? `<button class="btn btn-ghost btn-sm" onclick="downloadSubmissionFile(${s.id})">${esc(s.attachment_name || 'FILE')}</button>`
+        : '<span class="muted">—</span>'}</td>
       <td class="muted">${esc(s.submitted_at || '')}</td>
       <td>
         <input type="number" id="fs-${s.id}" min="0" max="100" value="${s.score != null ? s.score : ''}"
@@ -240,7 +305,14 @@ async function showSubmissions(id, title) {
       </td>
       <td><button class="btn btn-purple btn-sm" onclick="gradeSubmission(${s.id})">GRADE</button></td>
     </tr>
-  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">✎</span>No submissions yet.</div></td></tr>';
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">✎</span>No submissions yet.</div></td></tr>';
+}
+
+async function downloadSubmissionFile(sid) {
+  try {
+    const s = await api('/api/faculty/submissions/' + sid + '/attachment');
+    downloadFromB64(s.name, s.data);
+  } catch (err) { toast(err.message, true); }
 }
 
 function closeSubmissions() {

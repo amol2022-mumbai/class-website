@@ -25,6 +25,7 @@
       <nav class="side-nav" id="sideNav">
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> My Courses</button>
+        <button class="nav-item" data-tab="syllabus"><span class="nav-icon">▦</span> Syllabus</button>
         <button class="nav-item" data-tab="timetable"><span class="nav-icon">⧉</span> Timetable</button>
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
@@ -63,6 +64,24 @@
         <div class="panel">
           <div class="panel-header"><h2>Assigned Courses</h2></div>
           <div class="course-grid" id="courseGrid"></div>
+        </div>
+      </section>
+
+      <!-- Syllabus -->
+      <section id="tab-syllabus" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Syllabus Progress</h2>
+            <select class="input input-sm" id="facultySyllabusFilter" onchange="loadFacultySyllabus()">
+              <option value="">All Courses</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Course</th><th>Week</th><th>Topic</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody id="facultySyllabusRows"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -143,7 +162,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Student</th><th>Content</th><th>Submitted</th><th>Score</th><th>Action</th></tr></thead>
+              <thead><tr><th>Student</th><th>Content</th><th>File</th><th>Submitted</th><th>Score</th><th>Action</th></tr></thead>
               <tbody id="submissionRows"></tbody>
             </table>
           </div>

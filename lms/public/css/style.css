@@ -393,6 +393,13 @@ td .muted { color: var(--text-muted); font-size: 13px; }
 .qq-option input { accent-color: var(--cyan); }
 .qq-option.selected { border-color: var(--purple); background: var(--purple-dim); }
 
+/* Exam result review */
+.review-correct { border-color: rgba(46, 213, 115, 0.45); }
+.review-wrong { border-color: rgba(255, 71, 87, 0.4); }
+.qq-option.review-answer { border-color: var(--green); background: rgba(46, 213, 115, 0.12); }
+.qq-option.review-chosen { border-color: var(--red); background: rgba(255, 71, 87, 0.12); }
+.result-hero .badge { font-size: 13px; padding: 5px 12px; }
+
 /* Progress bars */
 .progress { height: 8px; background: var(--bg-elevated); border-radius: 10px; overflow: hidden; min-width: 100px; }
 .progress-bar { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 10px; }

@@ -548,7 +548,9 @@ app.delete('/api/admin/enrollments/:id', requireAdmin, (req, res) => {
 app.get('/api/admin/assignments', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   res.json(db.prepare(`
-    SELECT a.*, c.code AS course_code, c.title AS course_title,
+    SELECT a.*,
+      (CASE WHEN a.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
+      c.code AS course_code, c.title AS course_title,
       (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id) AS submitted_count,
       (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = a.course_id) AS enrolled_count
     FROM assignments a JOIN courses c ON c.id = a.course_id
@@ -558,21 +560,30 @@ app.get('/api/admin/assignments', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/assignments', requireAdmin, (req, res) => {
-  const { course_id, title, description, due_date, max_score } = req.body || {};
+  const { course_id, title, description, due_date, max_score, attachment_name, attachment_data } = req.body || {};
   if (!course_id || !title) return res.status(400).json({ error: 'Course and title are required' });
+  if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
   const result = db.prepare(
-    'INSERT INTO assignments (course_id, title, description, due_date, max_score) VALUES (?, ?, ?, ?, ?)'
-  ).run(course_id, title, description || '', due_date || null, max_score || 100);
+    'INSERT INTO assignments (course_id, title, description, due_date, max_score, attachment_name, attachment_data) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(course_id, title, description || '', due_date || null, max_score || 100, attachment_name || null, attachment_data || null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/assignments/:id', requireAdmin, (req, res) => {
   const assignment = db.prepare('SELECT * FROM assignments WHERE id = ?').get(req.params.id);
   if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
-  const { title, description, due_date, max_score } = req.body || {};
-  db.prepare('UPDATE assignments SET title = ?, description = ?, due_date = ?, max_score = ? WHERE id = ?')
-    .run(title || assignment.title, description ?? assignment.description,
-         due_date ?? assignment.due_date, max_score || assignment.max_score, assignment.id);
+  const { title, description, due_date, max_score, attachment_name, attachment_data, remove_attachment } = req.body || {};
+  if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
+  db.prepare(`
+    UPDATE assignments SET title = ?, description = ?, due_date = ?, max_score = ?,
+      attachment_name = ?, attachment_data = ? WHERE id = ?
+  `).run(
+    title || assignment.title, description ?? assignment.description,
+    due_date ?? assignment.due_date, max_score || assignment.max_score,
+    remove_attachment ? null : (attachment_name ?? assignment.attachment_name),
+    remove_attachment ? null : (attachment_data ?? assignment.attachment_data),
+    assignment.id
+  );
   res.json({ ok: true });
 });
 
@@ -584,7 +595,9 @@ app.delete('/api/admin/assignments/:id', requireAdmin, (req, res) => {
 // ---------- Admin: assignments submissions ----------
 app.get('/api/admin/assignments/:id/submissions', requireAdmin, (req, res) => {
   res.json(db.prepare(`
-    SELECT s.*, u.username, u.name AS student_name
+    SELECT s.id, s.assignment_id, s.student_id, s.content, s.score, s.submitted_at,
+      s.attachment_name, (CASE WHEN s.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
+      u.username, u.name AS student_name
     FROM submissions s JOIN users u ON u.id = s.student_id
     WHERE s.assignment_id = ? ORDER BY s.submitted_at DESC
   `).all(req.params.id));
@@ -595,7 +608,61 @@ app.post('/api/admin/assignments/:id/submissions/:sid/grade', requireAdmin, (req
   if (score === undefined || score === null || isNaN(score)) {
     return res.status(400).json({ error: 'Score is required' });
   }
-  db.prepare('UPDATE submissions SET score = ? WHERE id = ?').run(Number(score), req.params.sid);
+  db.prepare('UPDATE submissions SET score = ?, submitted_at = submitted_at WHERE id = ?').run(Number(score), req.params.sid);
+  res.json({ ok: true });
+});
+
+// Download the assignment brief/material file.
+app.get('/api/admin/assignments/:id/attachment', requireAdmin, (req, res) => {
+  const a = db.prepare('SELECT id, title, attachment_name, attachment_data FROM assignments WHERE id = ?')
+    .get(req.params.id);
+  if (!a || !a.attachment_name) return res.status(404).json({ error: 'No attachment on this assignment' });
+  res.json({ name: a.attachment_name, data: a.attachment_data, title: a.title });
+});
+
+// Download a student's submitted homework file (admin).
+app.get('/api/admin/submissions/:sid/attachment', requireAdmin, (req, res) => {
+  const s = db.prepare(`
+    SELECT s.id, s.attachment_name, s.attachment_data, s.student_id, a.title AS assignment_title
+    FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE s.id = ?
+  `).get(req.params.sid);
+  if (!s || !s.attachment_name) return res.status(404).json({ error: 'No attachment on this submission' });
+  res.json({ name: s.attachment_name, data: s.attachment_data, title: s.assignment_title });
+});
+
+// ---------- Admin: syllabus / lesson plans ----------
+app.get('/api/admin/syllabus', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const rows = db.prepare(`
+    SELECT sy.*, c.code AS course_code, c.title AS course_title
+    FROM syllabus sy JOIN courses c ON c.id = sy.course_id
+    WHERE ${branchWhere('c', bid)}
+    ORDER BY sy.course_id, sy.week_no
+  `).all(...(bid ? [bid] : []));
+  res.json(rows);
+});
+
+app.post('/api/admin/syllabus', requireAdmin, (req, res) => {
+  const { course_id, week_no, topic, description, objectives, status } = req.body || {};
+  if (!course_id || !topic) return res.status(400).json({ error: 'Course and topic are required' });
+  const result = db.prepare(
+    'INSERT INTO syllabus (course_id, week_no, topic, description, objectives, status) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(course_id, week_no || 1, topic, description || '', objectives || '', status || 'planned');
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/syllabus/:id', requireAdmin, (req, res) => {
+  const item = db.prepare('SELECT * FROM syllabus WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Syllabus item not found' });
+  const { week_no, topic, description, objectives, status } = req.body || {};
+  db.prepare('UPDATE syllabus SET week_no = ?, topic = ?, description = ?, objectives = ?, status = ? WHERE id = ?')
+    .run(week_no ?? item.week_no, topic || item.topic, description ?? item.description,
+         objectives ?? item.objectives, status || item.status, item.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/syllabus/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM syllabus WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -732,10 +799,23 @@ app.get('/api/student/courses', requireStudent, (req, res) => {
   `).all(req.session.user.id));
 });
 
+app.get('/api/student/syllabus', requireStudent, (req, res) => {
+  res.json(db.prepare(`
+    SELECT sy.*, c.code AS course_code, c.title AS course_title
+    FROM enrollments e
+    JOIN syllabus sy ON sy.course_id = e.course_id
+    JOIN courses c ON c.id = sy.course_id
+    WHERE e.student_id = ? ORDER BY sy.course_id, sy.week_no
+  `).all(req.session.user.id));
+});
+
 app.get('/api/student/assignments', requireStudent, (req, res) => {
   res.json(db.prepare(`
-    SELECT a.*, c.code AS course_code, c.title AS course_title,
-      s.score, s.submitted_at AS submitted,
+    SELECT a.*,
+      (CASE WHEN a.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
+      c.code AS course_code, c.title AS course_title,
+      s.score, s.submitted_at AS submitted, s.attachment_name AS my_attachment,
+      s.id AS my_submission_id,
       (CASE WHEN s.id IS NULL THEN 0 ELSE 1 END) AS is_submitted
     FROM enrollments e
     JOIN assignments a ON a.course_id = e.course_id
@@ -743,6 +823,27 @@ app.get('/api/student/assignments', requireStudent, (req, res) => {
     LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = e.student_id
     WHERE e.student_id = ? ORDER BY a.due_date
   `).all(req.session.user.id));
+});
+
+app.get('/api/student/assignments/:id/attachment', requireStudent, (req, res) => {
+  const a = db.prepare('SELECT id, title, attachment_name, attachment_data, course_id FROM assignments WHERE id = ?')
+    .get(req.params.id);
+  if (!a || !a.attachment_name) return res.status(404).json({ error: 'No attachment on this assignment' });
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, a.course_id);
+  if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this course' });
+  res.json({ name: a.attachment_name, data: a.attachment_data, title: a.title });
+});
+
+// Download own homework submission file.
+app.get('/api/student/submissions/:sid/attachment', requireStudent, (req, res) => {
+  const s = db.prepare(`
+    SELECT s.id, s.attachment_name, s.attachment_data, s.student_id, a.title AS assignment_title
+    FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE s.id = ?
+  `).get(req.params.sid);
+  if (!s || !s.attachment_name) return res.status(404).json({ error: 'No attachment on this submission' });
+  if (s.student_id !== req.session.user.id) return res.status(403).json({ error: 'Not your submission' });
+  res.json({ name: s.attachment_name, data: s.attachment_data, title: s.assignment_title });
 });
 
 app.post('/api/student/assignments/:id/submit', requireStudent, (req, res) => {
@@ -753,12 +854,21 @@ app.post('/api/student/assignments/:id/submit', requireStudent, (req, res) => {
   ).get(req.session.user.id, assignment.course_id);
   if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this course' });
 
-  const { content } = req.body || {};
+  const { content, attachment_name, attachment_data } = req.body || {};
+  if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Submission file data is missing' });
+  const existing = db.prepare('SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?')
+    .get(assignment.id, req.session.user.id);
   db.prepare(`
-    INSERT INTO submissions (assignment_id, student_id, content) VALUES (?, ?, ?)
-    ON CONFLICT(assignment_id, student_id) DO UPDATE SET content = excluded.content, submitted_at = datetime('now'), score = NULL
-  `).run(assignment.id, req.session.user.id, content || '');
-  res.json({ ok: true });
+    INSERT INTO submissions (assignment_id, student_id, content, attachment_name, attachment_data)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(assignment_id, student_id) DO UPDATE SET
+      content = excluded.content,
+      attachment_name = excluded.attachment_name,
+      attachment_data = excluded.attachment_data,
+      submitted_at = datetime('now'),
+      score = NULL
+  `).run(assignment.id, req.session.user.id, content || '', attachment_name || null, attachment_data || null);
+  res.json({ ok: true, id: existing ? existing.id : null });
 });
 
 app.get('/api/student/quizzes', requireStudent, (req, res) => {
@@ -1060,24 +1170,67 @@ app.delete('/api/admin/batches/:id/students/:sid', requireAdmin, (req, res) => {
 });
 
 // ---------- Admin: timetable ----------
+// Returns slots that overlap the given time window on the same day for the same
+// batch, instructor or room (excluding the slot being edited).
+function findTimetableConflicts({ batch_id, day, start_time, end_time, instructor, room, excludeId }) {
+  const overlaps = (a, b) => a.start_time < b.end_time && b.start_time < a.end_time;
+  const rows = db.prepare('SELECT * FROM timetable WHERE day = ?').all(day)
+    .filter(r => !excludeId || r.id !== excludeId);
+  const conflicts = [];
+  const check = (row, kind, detail) => {
+    if (overlaps(row, { start_time, end_time })) {
+      conflicts.push({ id: row.id, kind, detail, start_time: row.start_time, end_time: row.end_time, subject: row.subject });
+    }
+  };
+  for (const r of rows) {
+    if (batch_id && r.batch_id === batch_id) check(r, 'batch', 'Same batch');
+    if (instructor && r.instructor && r.instructor.trim() === instructor.trim()) check(r, 'instructor', 'Same instructor: ' + r.instructor);
+    if (room && r.room && r.room.trim().toLowerCase() === room.trim().toLowerCase()) check(r, 'room', 'Same room: ' + r.room);
+  }
+  return conflicts;
+}
+
 app.post('/api/admin/timetable', requireAdmin, (req, res) => {
-  const { batch_id, day, start_time, end_time, subject, instructor } = req.body || {};
+  const { batch_id, day, start_time, end_time, subject, instructor, room } = req.body || {};
   if (!batch_id || !day || !start_time || !end_time || !subject) {
     return res.status(400).json({ error: 'Batch, day, times and subject are required' });
   }
+  if (start_time >= end_time) return res.status(400).json({ error: 'Start time must be before end time' });
+  const conflicts = findTimetableConflicts({ batch_id, day, start_time, end_time, instructor, room });
+  if (conflicts.length) {
+    return res.status(409).json({
+      error: 'Timetable conflict: ' + conflicts.map(c => c.detail + ' (' + c.start_time + '–' + c.end_time + ' ' + c.subject + ')').join('; '),
+      conflicts,
+    });
+  }
   const result = db.prepare(
-    'INSERT INTO timetable (batch_id, day, start_time, end_time, subject, instructor) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(batch_id, day, start_time, end_time, subject, instructor || '');
+    'INSERT INTO timetable (batch_id, day, start_time, end_time, subject, instructor, room) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(batch_id, day, start_time, end_time, subject, instructor || '', room || '');
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/timetable/:id', requireAdmin, (req, res) => {
   const slot = db.prepare('SELECT * FROM timetable WHERE id = ?').get(req.params.id);
   if (!slot) return res.status(404).json({ error: 'Timetable slot not found' });
-  const { day, start_time, end_time, subject, instructor } = req.body || {};
-  db.prepare('UPDATE timetable SET day = ?, start_time = ?, end_time = ?, subject = ?, instructor = ? WHERE id = ?')
-    .run(day || slot.day, start_time || slot.start_time, end_time || slot.end_time,
-         subject || slot.subject, instructor ?? slot.instructor, slot.id);
+  const { day, start_time, end_time, subject, instructor, room } = req.body || {};
+  const next = {
+    day: day || slot.day,
+    start_time: start_time || slot.start_time,
+    end_time: end_time || slot.end_time,
+    instructor: instructor ?? slot.instructor,
+    room: room ?? slot.room,
+    subject: subject || slot.subject,
+  };
+  if (next.start_time >= next.end_time) return res.status(400).json({ error: 'Start time must be before end time' });
+  const conflicts = findTimetableConflicts({ ...next, batch_id: slot.batch_id, excludeId: slot.id });
+  if (conflicts.length) {
+    return res.status(409).json({
+      error: 'Timetable conflict: ' + conflicts.map(c => c.detail + ' (' + c.start_time + '–' + c.end_time + ' ' + c.subject + ')').join('; '),
+      conflicts,
+    });
+  }
+  db.prepare('UPDATE timetable SET day = ?, start_time = ?, end_time = ?, subject = ?, instructor = ?, room = ? WHERE id = ?')
+    .run(next.day, next.start_time, next.end_time, next.subject, next.instructor, next.room, slot.id);
   res.json({ ok: true });
 });
 
@@ -1188,20 +1341,26 @@ app.get('/api/admin/exams', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/exams', requireAdmin, (req, res) => {
-  const { course_id, title, exam_date, max_marks, duration_minutes } = req.body || {};
+  const { course_id, title, exam_date, max_marks, duration_minutes, available_from, available_to } = req.body || {};
   if (!course_id || !title) return res.status(400).json({ error: 'Course and exam title are required' });
   const result = db.prepare(
-    'INSERT INTO exams (course_id, title, exam_date, max_marks, duration_minutes) VALUES (?, ?, ?, ?, ?)'
-  ).run(course_id, title, exam_date || null, max_marks || 100, duration_minutes || 0);
+    'INSERT INTO exams (course_id, title, exam_date, max_marks, duration_minutes, available_from, available_to) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(course_id, title, exam_date || null, max_marks || 100, duration_minutes || 0, available_from || null, available_to || null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/exams/:id', requireAdmin, (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
   if (!exam) return res.status(404).json({ error: 'Exam not found' });
-  const { title, exam_date, max_marks, duration_minutes } = req.body || {};
-  db.prepare('UPDATE exams SET title = ?, exam_date = ?, max_marks = ?, duration_minutes = ? WHERE id = ?')
-    .run(title || exam.title, exam_date ?? exam.exam_date, max_marks || exam.max_marks, duration_minutes ?? exam.duration_minutes, exam.id);
+  const { title, exam_date, max_marks, duration_minutes, available_from, available_to } = req.body || {};
+  db.prepare('UPDATE exams SET title = ?, exam_date = ?, max_marks = ?, duration_minutes = ?, available_from = ?, available_to = ? WHERE id = ?')
+    .run(
+      title || exam.title, exam_date ?? exam.exam_date, max_marks || exam.max_marks,
+      duration_minutes ?? exam.duration_minutes,
+      available_from !== undefined ? (available_from || null) : exam.available_from,
+      available_to !== undefined ? (available_to || null) : exam.available_to,
+      exam.id
+    );
   res.json({ ok: true });
 });
 
@@ -1421,7 +1580,8 @@ app.get('/api/student/timetable', requireStudent, (req, res) => {
 });
 
 app.get('/api/student/exams', requireStudent, (req, res) => {
-  res.json(db.prepare(`
+  const nowIso = new Date().toISOString();
+  const rows = db.prepare(`
     SELECT x.*, c.code AS course_code, c.title AS course_title, r.marks,
       (SELECT COUNT(*) FROM exam_questions q WHERE q.exam_id = x.id) AS question_count
     FROM enrollments e
@@ -1429,22 +1589,55 @@ app.get('/api/student/exams', requireStudent, (req, res) => {
     JOIN courses c ON c.id = x.course_id
     LEFT JOIN exam_results r ON r.exam_id = x.id AND r.student_id = e.student_id
     WHERE e.student_id = ? ORDER BY x.exam_date
-  `).all(req.session.user.id));
+  `).all(req.session.user.id).map(x => {
+    let state = 'available';
+    if (x.marks !== null && x.marks !== undefined) state = 'submitted';
+    else if (x.available_from && nowIso < x.available_from) state = 'scheduled';
+    else if (x.available_to && nowIso > x.available_to) state = 'closed';
+    return { ...x, state };
+  });
+  res.json(rows);
 });
 
 // ---------- Student: online exam taking ----------
+// Helper: checks the exam publish window and existing attempt. Returns an error
+// object or null if the student may proceed.
+function examAccessCheck(exam, studentId) {
+  if (db.prepare('SELECT id FROM exam_results WHERE exam_id = ? AND student_id = ?').get(exam.id, studentId)) {
+    return { status: 409, error: 'You have already submitted this exam' };
+  }
+  const now = new Date();
+  const nowIso = now.toISOString();
+  if (exam.available_from && nowIso < exam.available_from) {
+    return { status: 423, error: 'This exam has not started yet. It opens on ' + exam.available_from };
+  }
+  if (exam.available_to && nowIso > exam.available_to) {
+    return { status: 410, error: 'The submission window for this exam has closed' };
+  }
+  return null;
+}
+
 app.get('/api/student/exams/:id/paper', requireStudent, (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id);
   if (!exam) return res.status(404).json({ error: 'Exam not found' });
   const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
     .get(req.session.user.id, exam.course_id);
   if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in this course' });
-  if (db.prepare('SELECT id FROM exam_results WHERE exam_id = ? AND student_id = ?').get(exam.id, req.session.user.id)) {
-    return res.status(409).json({ error: 'You have already submitted this exam' });
-  }
+  const blocked = examAccessCheck(exam, req.session.user.id);
+  if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
   const questions = db.prepare('SELECT id, text, options, marks FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
   if (!questions.length) return res.status(400).json({ error: 'No question paper published yet' });
+
+  // Record when the student opened the paper (kept separate from results so a
+  // mid-window refresh does not count as a submission). Server-side duration
+  // enforcement uses this timestamp.
+  db.prepare(`
+    INSERT INTO exam_attempts (exam_id, student_id) VALUES (?, ?)
+    ON CONFLICT(exam_id, student_id) DO NOTHING
+  `).run(exam.id, req.session.user.id);
+
   res.json({
     exam: { id: exam.id, title: exam.title, duration_minutes: exam.duration_minutes || 0, max_marks: exam.max_marks },
     questions,
@@ -1457,11 +1650,26 @@ app.post('/api/student/exams/:id/submit', requireStudent, (req, res) => {
   const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
     .get(req.session.user.id, exam.course_id);
   if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in this course' });
-  if (db.prepare('SELECT id FROM exam_results WHERE exam_id = ? AND student_id = ?').get(exam.id, req.session.user.id)) {
-    return res.status(409).json({ error: 'You have already submitted this exam' });
-  }
+  const blocked = examAccessCheck(exam, req.session.user.id);
+  if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
   const questions = db.prepare('SELECT * FROM exam_questions WHERE exam_id = ?').all(exam.id);
   if (!questions.length) return res.status(400).json({ error: 'No question paper published yet' });
+
+  // Enforce the time limit server-side using the attempt start timestamp.
+  const duration = exam.duration_minutes || 0;
+  if (duration > 0) {
+    const attempt = db.prepare('SELECT started_at FROM exam_attempts WHERE exam_id = ? AND student_id = ?')
+      .get(exam.id, req.session.user.id);
+    if (attempt) {
+      const started = new Date(attempt.started_at + (attempt.started_at.includes('T') ? '' : 'T00:00:00'));
+      const deadline = new Date(started.getTime() + duration * 60000);
+      if (new Date() > deadline) {
+        return res.status(400).json({ error: 'Time is up for this exam. Your attempt was auto-submitted.', expired: true });
+      }
+    }
+  }
+
   const answers = (req.body || {}).answers || {};
   let score = 0;
   let total = 0;
@@ -1470,8 +1678,65 @@ app.post('/api/student/exams/:id/submit', requireStudent, (req, res) => {
     total += marks;
     if (Number(answers[q.id]) === q.correct_index) score += marks;
   }
-  db.prepare('INSERT INTO exam_results (exam_id, student_id, marks) VALUES (?, ?, ?)').run(exam.id, req.session.user.id, score);
+  db.prepare('INSERT INTO exam_results (exam_id, student_id, marks, answers) VALUES (?, ?, ?, ?)').run(exam.id, req.session.user.id, score, JSON.stringify(answers));
+  db.prepare('UPDATE exam_attempts SET submitted_at = datetime(\'now\') WHERE exam_id = ? AND student_id = ?')
+    .run(exam.id, req.session.user.id);
   res.status(201).json({ score, total, percentage: total ? Math.round((score / total) * 100) : 0 });
+});
+
+// Student: own exam result + answer review. Returns score, class rank and a
+// per-question breakdown (student choice vs correct answer) for review.
+app.get('/api/student/exams/:id/result', requireStudent, (req, res) => {
+  const exam = db.prepare(`
+    SELECT x.*, c.code AS course_code, c.title AS course_title
+    FROM exams x JOIN courses c ON c.id = x.course_id WHERE x.id = ?
+  `).get(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found' });
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, exam.course_id);
+  if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in this course' });
+  const result = db.prepare(`
+    SELECT r.*, a.submitted_at FROM exam_results r
+    LEFT JOIN exam_attempts a ON a.exam_id = r.exam_id AND a.student_id = r.student_id
+    WHERE r.exam_id = ? AND r.student_id = ?
+  `).get(exam.id, req.session.user.id);
+  if (!result) return res.status(404).json({ error: 'You have not submitted this exam yet' });
+
+  const questions = db.prepare('SELECT * FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam.id);
+  let answers = {};
+  try { answers = result.answers ? JSON.parse(result.answers) : {}; } catch (_) { answers = {}; }
+  let earned = 0;
+  let total = 0;
+  const review = questions.map((q, qi) => {
+    const opts = JSON.parse(q.options);
+    const chosen = answers[q.id] !== undefined && answers[q.id] !== null ? Number(answers[q.id]) : null;
+    const correct = chosen === q.correct_index;
+    const marks = q.marks || 1;
+    total += marks;
+    if (correct) earned += marks;
+    return {
+      id: q.id, index: qi + 1, text: q.text, options: opts,
+      chosen, correct_index: q.correct_index, marks,
+      correct, earned: correct ? marks : 0,
+    };
+  });
+
+  // Class rank: number of students who scored strictly higher + 1.
+  const better = db.prepare('SELECT COUNT(*) AS c FROM exam_results WHERE exam_id = ? AND marks > ?')
+    .get(exam.id, result.marks).c;
+  const totalTakers = db.prepare('SELECT COUNT(*) AS c FROM exam_results WHERE exam_id = ?').get(exam.id).c;
+  const percentage = total ? Math.round((result.marks / total) * 100) : 0;
+
+  res.json({
+    exam: { id: exam.id, title: exam.title, course_title: exam.course_title, max_marks: exam.max_marks },
+    result: {
+      marks: result.marks, total, percentage,
+      rank: better + 1, total_takers: totalTakers,
+      percentile: totalTakers ? Math.max(0, Math.round(((totalTakers - better) / totalTakers) * 100)) : 0,
+      submitted_at: result.submitted_at,
+    },
+    review,
+  });
 });
 
 app.get('/api/student/fees', requireStudent, (req, res) => {
@@ -1480,6 +1745,21 @@ app.get('/api/student/fees', requireStudent, (req, res) => {
     SELECT p.* FROM payments p WHERE p.student_id = ? ORDER BY p.paid_at DESC
   `).all(req.session.user.id);
   res.json({ ...snap, payments });
+});
+
+// Student-facing payment receipt (ownership enforced).
+app.get('/api/student/payments/:id/receipt', requireStudent, (req, res) => {
+  const payment = db.prepare(`
+    SELECT p.*, u.username, u.name AS student_name, u.email, u.mobile
+    FROM payments p JOIN users u ON u.id = p.student_id WHERE p.id = ? AND p.student_id = ?
+  `).get(req.params.id, req.session.user.id);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  const branch = db.prepare('SELECT * FROM branches WHERE id = ?').get(payment.branch_id);
+  const courses = db.prepare(`
+    SELECT c.code, c.title FROM enrollments e JOIN courses c ON c.id = e.course_id
+    WHERE e.student_id = ? ORDER BY c.code
+  `).all(req.session.user.id);
+  res.json({ payment, branch, courses });
 });
 
 app.get('/api/student/certificates', requireStudent, (req, res) => {
@@ -1503,6 +1783,52 @@ app.get('/api/faculty/courses', requireFaculty, (req, res) => {
     LEFT JOIN batches b ON b.course_id = c.id
     WHERE fc.faculty_id = ? ORDER BY c.code
   `).all(req.session.user.id));
+});
+
+// Syllabus for the courses this faculty teaches (progress update allowed).
+app.get('/api/faculty/syllabus', requireFaculty, (req, res) => {
+  res.json(db.prepare(`
+    SELECT sy.*, c.code AS course_code, c.title AS course_title
+    FROM faculty_courses fc
+    JOIN syllabus sy ON sy.course_id = fc.course_id
+    JOIN courses c ON c.id = fc.course_id
+    WHERE fc.faculty_id = ? ORDER BY sy.course_id, sy.week_no
+  `).all(req.session.user.id));
+});
+
+app.post('/api/faculty/syllabus', requireFaculty, (req, res) => {
+  const { course_id, week_no, topic, description, objectives, status } = req.body || {};
+  if (!course_id || !topic) return res.status(400).json({ error: 'Course and topic are required' });
+  const owns = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, course_id);
+  if (!owns) return res.status(403).json({ error: 'You do not teach this course' });
+  const result = db.prepare(
+    'INSERT INTO syllabus (course_id, week_no, topic, description, objectives, status) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(course_id, week_no || 1, topic, description || '', objectives || '', status || 'planned');
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/faculty/syllabus/:id', requireFaculty, (req, res) => {
+  const item = db.prepare('SELECT * FROM syllabus WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Syllabus item not found' });
+  const owns = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, item.course_id);
+  if (!owns) return res.status(403).json({ error: 'You do not teach this course' });
+  const { week_no, topic, description, objectives, status } = req.body || {};
+  db.prepare('UPDATE syllabus SET week_no = ?, topic = ?, description = ?, objectives = ?, status = ? WHERE id = ?')
+    .run(week_no ?? item.week_no, topic || item.topic, description ?? item.description,
+         objectives ?? item.objectives, status || item.status, item.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/faculty/syllabus/:id', requireFaculty, (req, res) => {
+  const item = db.prepare('SELECT * FROM syllabus WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Syllabus item not found' });
+  const owns = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, item.course_id);
+  if (!owns) return res.status(403).json({ error: 'You do not teach this course' });
+  db.prepare('DELETE FROM syllabus WHERE id = ?').run(item.id);
+  res.json({ ok: true });
 });
 
 app.get('/api/faculty/timetable', requireFaculty, (req, res) => {
@@ -1548,7 +1874,20 @@ app.get('/api/faculty/courses/:id/assignments', requireFaculty, (req, res) => {
     'SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?'
   ).get(req.session.user.id, req.params.id);
   if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
-  res.json(db.prepare('SELECT * FROM assignments WHERE course_id = ? ORDER BY due_date').all(req.params.id));
+  res.json(db.prepare(`
+    SELECT a.*, (CASE WHEN a.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment
+    FROM assignments a WHERE a.course_id = ? ORDER BY due_date
+  `).all(req.params.id));
+});
+
+app.get('/api/faculty/assignments/:id/attachment', requireFaculty, (req, res) => {
+  const a = db.prepare(`
+    SELECT a.id, a.title, a.attachment_name, a.attachment_data FROM assignments a
+    JOIN faculty_courses fc ON fc.course_id = a.course_id
+    WHERE a.id = ? AND fc.faculty_id = ?
+  `).get(req.params.id, req.session.user.id);
+  if (!a || !a.attachment_name) return res.status(404).json({ error: 'No attachment on this assignment' });
+  res.json({ name: a.attachment_name, data: a.attachment_data, title: a.title });
 });
 
 app.get('/api/faculty/assignments/:id/submissions', requireFaculty, (req, res) => {
@@ -1559,10 +1898,25 @@ app.get('/api/faculty/assignments/:id/submissions', requireFaculty, (req, res) =
   `).get(req.params.id, req.session.user.id);
   if (!assignment) return res.status(403).json({ error: 'Not assigned to this course' });
   res.json(db.prepare(`
-    SELECT s.*, u.username, u.name AS student_name
+    SELECT s.id, s.assignment_id, s.student_id, s.content, s.score, s.submitted_at,
+      s.attachment_name, (CASE WHEN s.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
+      u.username, u.name AS student_name
     FROM submissions s JOIN users u ON u.id = s.student_id
     WHERE s.assignment_id = ? ORDER BY s.submitted_at DESC
   `).all(req.params.id));
+});
+
+// Faculty download of a student's homework file.
+app.get('/api/faculty/submissions/:sid/attachment', requireFaculty, (req, res) => {
+  const s = db.prepare(`
+    SELECT s.id, s.attachment_name, s.attachment_data, s.student_id, a.title AS assignment_title, a.course_id
+    FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE s.id = ?
+  `).get(req.params.sid);
+  if (!s || !s.attachment_name) return res.status(404).json({ error: 'No attachment on this submission' });
+  const owned = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, s.course_id);
+  if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
+  res.json({ name: s.attachment_name, data: s.attachment_data, title: s.assignment_title });
 });
 
 app.post('/api/faculty/assignments/:id/submissions/:sid/grade', requireFaculty, (req, res) => {
@@ -1763,34 +2117,51 @@ app.post('/api/admin/restore', requireAdmin, (req, res) => {
 app.get('/api/admin/notices', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   res.json(db.prepare(`
-    SELECT n.*, b.name AS branch_name FROM notices n
+    SELECT n.id, n.title, n.body, n.publish_date, n.expires_on, n.created_at, n.attachment_name,
+      (CASE WHEN n.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
+      b.name AS branch_name FROM notices n
     LEFT JOIN branches b ON b.id = n.branch_id
     WHERE ${branchWhere('n', bid)}
     ORDER BY n.publish_date DESC
   `).all(...(bid ? [bid] : [])));
 });
 
+// Download a notice circular attachment (name + base64 data for client blob).
+app.get('/api/admin/notices/:id/attachment', requireAdmin, (req, res) => {
+  const n = db.prepare('SELECT id, title, attachment_name, attachment_data FROM notices WHERE id = ?')
+    .get(req.params.id);
+  if (!n || !n.attachment_name) return res.status(404).json({ error: 'No attachment on this notice' });
+  res.json({ name: n.attachment_name, data: n.attachment_data, title: n.title });
+});
+
 app.post('/api/admin/notices', requireAdmin, (req, res) => {
-  const { title, body, publish_date, expires_on } = req.body || {};
+  const { title, body, publish_date, expires_on, attachment_name, attachment_data } = req.body || {};
   if (!title) return res.status(400).json({ error: 'Title is required' });
+  if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
   const result = db.prepare(
-    'INSERT INTO notices (branch_id, title, body, publish_date, expires_on) VALUES (?, ?, ?, ?, ?)'
-  ).run(activeBranch(req), title, body || null, publish_date || null, expires_on || null);
+    'INSERT INTO notices (branch_id, title, body, publish_date, expires_on, attachment_name, attachment_data) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(activeBranch(req), title, body || null, publish_date || null, expires_on || null,
+        attachment_name || null, attachment_data || null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/notices/:id', requireAdmin, (req, res) => {
   const notice = db.prepare('SELECT * FROM notices WHERE id = ?').get(req.params.id);
   if (!notice) return res.status(404).json({ error: 'Notice not found' });
-  const { title, body, publish_date, expires_on } = req.body || {};
-  db.prepare('UPDATE notices SET title = ?, body = ?, publish_date = ?, expires_on = ? WHERE id = ?')
-    .run(
-      title ?? notice.title,
-      body !== undefined ? body : notice.body,
-      publish_date !== undefined ? (publish_date || null) : notice.publish_date,
-      expires_on !== undefined ? (expires_on || null) : notice.expires_on,
-      notice.id
-    );
+  const { title, body, publish_date, expires_on, attachment_name, attachment_data, remove_attachment } = req.body || {};
+  if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
+  db.prepare(`
+    UPDATE notices SET title = ?, body = ?, publish_date = ?, expires_on = ?,
+      attachment_name = ?, attachment_data = ? WHERE id = ?
+  `).run(
+    title ?? notice.title,
+    body !== undefined ? body : notice.body,
+    publish_date !== undefined ? (publish_date || null) : notice.publish_date,
+    expires_on !== undefined ? (expires_on || null) : notice.expires_on,
+    remove_attachment ? null : (attachment_name ?? notice.attachment_name),
+    remove_attachment ? null : (attachment_data ?? notice.attachment_data),
+    notice.id
+  );
   res.json({ ok: true });
 });
 
@@ -1907,6 +2278,86 @@ app.delete('/api/admin/assets/:id', requireAdmin, (req, res) => {
   const result = db.prepare('DELETE FROM assets WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Asset not found' });
   res.json({ ok: true });
+});
+
+// ---------- Admin: inventory / store ----------
+app.get('/api/admin/inventory', requireAdmin, (req, res) => {
+  const bid = activeBranch(req);
+  const items = db.prepare(`
+    SELECT i.*, b.name AS branch_name,
+      (SELECT COALESCE(SUM(CASE WHEN t.type = 'in' THEN t.change ELSE -t.change END), 0)
+       FROM inventory_transactions t WHERE t.item_id = i.id) AS computed_quantity
+    FROM inventory_items i JOIN branches b ON b.id = i.branch_id
+    WHERE ${branchWhere('i', bid)}
+    ORDER BY i.category, i.name
+  `).all(...(bid ? [bid] : []));
+  res.json(items);
+});
+
+app.post('/api/admin/inventory', requireAdmin, (req, res) => {
+  const { name, category, sku, quantity, unit, reorder_level, cost_price, note } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Item name is required' });
+  const bid = activeBranch(req);
+  const qty = Math.max(0, Number(quantity) || 0);
+  const result = db.prepare(
+    'INSERT INTO inventory_items (branch_id, name, category, sku, quantity, unit, reorder_level, cost_price, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(bid, name, category || null, sku || null, qty, unit || 'pcs', Number(reorder_level) || 0, Number(cost_price) || 0, note || null);
+  if (qty > 0) {
+    db.prepare(
+      'INSERT INTO inventory_transactions (branch_id, item_id, change, type, note) VALUES (?, ?, ?, ?, ?)'
+    ).run(bid, result.lastInsertRowid, qty, 'in', 'Opening stock');
+  }
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/admin/inventory/:id', requireAdmin, (req, res) => {
+  const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+  const { name, category, sku, unit, reorder_level, cost_price, note } = req.body || {};
+  db.prepare('UPDATE inventory_items SET name = ?, category = ?, sku = ?, unit = ?, reorder_level = ?, cost_price = ?, note = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run(name || item.name, category ?? item.category, sku ?? item.sku, unit || item.unit,
+         reorder_level != null ? Number(reorder_level) : item.reorder_level,
+         cost_price != null ? Number(cost_price) : item.cost_price,
+         note !== undefined ? note : item.note, item.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/inventory/:id', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM inventory_items WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Inventory item not found' });
+  res.json({ ok: true });
+});
+
+// Stock in/out/adjust movement. Adjusting the quantity directly is allowed via
+// type 'adjust' (records the delta from current), 'in'/'out' record movement.
+app.post('/api/admin/inventory/:id/transact', requireAdmin, (req, res) => {
+  const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+  const { change, type, note } = req.body || {};
+  if (!change || isNaN(Number(change))) return res.status(400).json({ error: 'A quantity change is required' });
+  const t = type === 'out' ? 'out' : type === 'adjust' ? 'adjust' : 'in';
+  const delta = Math.round(Number(change));
+  if (t === 'out' && item.quantity + delta < 0) {
+    return res.status(400).json({ error: 'Insufficient stock for this issue' });
+  }
+  const finalQty = t === 'adjust' ? Math.max(0, delta) : item.quantity + delta;
+  const appliedDelta = finalQty - item.quantity;
+  db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run(finalQty, item.id);
+  if (appliedDelta !== 0) {
+    db.prepare(
+      'INSERT INTO inventory_transactions (branch_id, item_id, change, type, note) VALUES (?, ?, ?, ?, ?)'
+    ).run(item.branch_id, item.id, Math.abs(appliedDelta), t, note || null);
+  }
+  res.json({ ok: true, quantity: finalQty, delta: appliedDelta });
+});
+
+app.get('/api/admin/inventory/:id/transactions', requireAdmin, (req, res) => {
+  res.json(db.prepare(`
+    SELECT t.*, i.name AS item_name FROM inventory_transactions t
+    JOIN inventory_items i ON i.id = t.item_id
+    WHERE t.item_id = ? ORDER BY t.id DESC LIMIT 100
+  `).all(req.params.id));
 });
 
 // ---------- GST summary (output invoice GST vs input credit) ----------
@@ -2113,11 +2564,21 @@ app.get('/api/parent/children/:id/idcard', requireParent, (req, res) => {
 app.get('/api/student/notices', requireStudent, (req, res) => {
   const s = db.prepare('SELECT branch_id FROM users WHERE id = ?').get(req.session.user.id);
   const rows = db.prepare(`
-    SELECT n.id, n.title, n.body, n.publish_date, n.expires_on
+    SELECT n.id, n.title, n.body, n.publish_date, n.expires_on, n.attachment_name,
+      (CASE WHEN n.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment
     FROM notices n WHERE (n.branch_id IS NULL OR n.branch_id = ?) AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
     ORDER BY n.publish_date DESC
   `).all(s ? s.branch_id : null);
   res.json(rows);
+});
+
+app.get('/api/student/notices/:id/attachment', requireStudent, (req, res) => {
+  const n = db.prepare('SELECT id, branch_id, title, attachment_name, attachment_data FROM notices WHERE id = ?')
+    .get(req.params.id);
+  if (!n || !n.attachment_name) return res.status(404).json({ error: 'No attachment on this notice' });
+  const s = db.prepare('SELECT branch_id FROM users WHERE id = ?').get(req.session.user.id);
+  if (n.branch_id && n.branch_id !== s.branch_id) return res.status(403).json({ error: 'Not available for your branch' });
+  res.json({ name: n.attachment_name, data: n.attachment_data, title: n.title });
 });
 
 app.get('/api/parent/notices', requireParent, (req, res) => {
@@ -2240,7 +2701,68 @@ app.get('/api/admin/dashboard/charts', requireAdmin, (req, res) => {
     WHERE ${w('c')} GROUP BY c.id ORDER BY students DESC LIMIT 5
   `).all(...a);
 
-  res.json({ revenue_by_month: revenueByMonth, fee_status: { paid, pending, overdue }, enquiries, top_courses: topCourses });
+  // Attendance trend: per-day attendance percentage over the last 30 days.
+  const attendanceTrend = db.prepare(`
+    SELECT a.date, COUNT(*) AS total,
+      SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present
+    FROM attendance a
+    JOIN courses c ON c.id = a.course_id
+    WHERE ${w('c')} AND a.date >= date('now', '-30 days')
+    GROUP BY a.date ORDER BY a.date
+  `).all(...a).map(r => ({
+    date: r.date, present: Number(r.present), total: r.total,
+    pct: r.total ? Math.round((r.present / r.total) * 100) : 0,
+  }));
+
+  // Income vs expense per month (last 6 months with any activity).
+  const incomeByMonth = db.prepare(`
+    SELECT substr(paid_at, 1, 7) AS month, COALESCE(SUM(amount), 0) AS total
+    FROM payments WHERE ${w('payments')} AND paid_at IS NOT NULL
+    GROUP BY month
+  `).all(...a);
+  const expenseByMonth = db.prepare(`
+    SELECT substr(expense_date, 1, 7) AS month, COALESCE(SUM(amount), 0) AS total
+    FROM expenses WHERE ${w('expenses')}
+    GROUP BY month
+  `).all(...a);
+  const monthMap = new Map();
+  for (const r of incomeByMonth) monthMap.set(r.month, { month: r.month, income: r.total, expense: 0 });
+  for (const r of expenseByMonth) {
+    if (!monthMap.has(r.month)) monthMap.set(r.month, { month: r.month, income: 0, expense: r.total });
+    else monthMap.get(r.month).expense = r.total;
+  }
+  const incomeVsExpense = [...monthMap.values()].sort((x, y) => x.month.localeCompare(y.month)).slice(-6);
+
+  // Pass rates: exams with results compared to max marks, plus assignment
+  // completion rate.
+  const examStats = db.prepare(`
+    SELECT x.id, x.max_marks, COUNT(r.id) AS attempts,
+      SUM(CASE WHEN r.marks >= 0.4 * x.max_marks THEN 1 ELSE 0 END) AS passed
+    FROM exams x
+    JOIN courses c ON c.id = x.course_id
+    LEFT JOIN exam_results r ON r.exam_id = x.id
+    WHERE ${w('c')} AND r.id IS NOT NULL
+    GROUP BY x.id
+  `).all(...a);
+  const passRate = examStats.length
+    ? Math.round((examStats.reduce((s, e) => s + (e.passed || 0), 0) / examStats.reduce((s, e) => s + e.attempts, 0)) * 100)
+    : 0;
+
+  const assignmentsStats = db.prepare(`
+    SELECT COUNT(s.id) AS submitted
+    FROM assignments a
+    JOIN courses c ON c.id = a.course_id
+    LEFT JOIN submissions s ON s.assignment_id = a.id
+    WHERE ${w('c')}
+  `).all(...a);
+  const assignmentCompletion = assignmentsStats[0] && assignmentsStats[0].submitted;
+
+  res.json({
+    revenue_by_month: revenueByMonth, fee_status: { paid, pending, overdue },
+    enquiries, top_courses: topCourses, attendance_trend: attendanceTrend,
+    income_vs_expense: incomeVsExpense, pass_rate: passRate,
+    assignment_submissions: assignmentCompletion,
+  });
 });
 
 // =====================================================================

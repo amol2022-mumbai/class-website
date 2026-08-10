@@ -155,6 +155,15 @@ db.exec(`
     marks REAL DEFAULT 1
   );
 
+  CREATE TABLE IF NOT EXISTS exam_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at TEXT DEFAULT (datetime('now')),
+    submitted_at TEXT,
+    UNIQUE(exam_id, student_id)
+  );
+
   CREATE TABLE IF NOT EXISTS certificates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -426,6 +435,41 @@ db.exec(`
     created_by TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS syllabus (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    week_no INTEGER DEFAULT 1,
+    topic TEXT NOT NULL,
+    description TEXT,
+    objectives TEXT,
+    status TEXT DEFAULT 'planned' CHECK (status IN ('planned', 'in-progress', 'completed')),
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS inventory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    category TEXT,
+    sku TEXT,
+    quantity INTEGER DEFAULT 0,
+    unit TEXT DEFAULT 'pcs',
+    reorder_level INTEGER DEFAULT 0,
+    cost_price REAL DEFAULT 0,
+    note TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS inventory_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+    change INTEGER NOT NULL,
+    type TEXT DEFAULT 'in' CHECK (type IN ('in', 'out', 'adjust')),
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations for databases created by earlier versions of the app.
@@ -488,6 +532,16 @@ function migrate() {
   addCol('courses', 'branch_id INTEGER');
   addCol('payments', 'branch_id INTEGER');
   addCol('notifications', 'broadcast_id INTEGER');
+  addCol('timetable', 'room TEXT');
+  addCol('exams', 'available_from TEXT');
+  addCol('exams', 'available_to TEXT');
+  addCol('notices', 'attachment_name TEXT');
+  addCol('notices', 'attachment_data TEXT');
+  addCol('submissions', 'attachment_name TEXT');
+  addCol('submissions', 'attachment_data TEXT');
+  addCol('assignments', 'attachment_name TEXT');
+  addCol('assignments', 'attachment_data TEXT');
+  addCol('exam_results', 'answers TEXT');
 }
 
 // Backfills branch_id on rows created before branches existed, and guarantees a
@@ -768,17 +822,50 @@ function seedModules() {
     );
     const exam1 = insertExam.run(courseIds[0], 'CS101 Mid-Term', formatFut(20), 100).lastInsertRowid;
     const exam2 = insertExam.run(courseIds[1], 'CS201 Web Fundamentals Test', formatFut(25), 100).lastInsertRowid;
-    const insertResult = db.prepare(
-      'INSERT INTO exam_results (exam_id, student_id, marks) VALUES (?, ?, ?)'
+
+    const insertQuestion = db.prepare(
+      'INSERT INTO exam_questions (exam_id, text, options, correct_index, marks) VALUES (?, ?, ?, ?, ?)'
     );
+    const seedQuestions = [
+      ['Which data structure uses FIFO ordering?', JSON.stringify(['Stack', 'Queue', 'Tree', 'Graph']), 1, 10],
+      ['What does CPU stand for?', JSON.stringify(['Central Processing Unit', 'Computer Personal Unit', 'Central Program Utility', 'Control Processing Unit']), 0, 10],
+      ['Which is a valid Python keyword?', JSON.stringify(['begin', 'class', 'function', 'var']), 1, 10],
+      ['What is 2^8?', JSON.stringify(['16', '64', '128', '256']), 3, 10],
+      ['Which layer handles HTTP?', JSON.stringify(['Transport', 'Application', 'Network', 'Data Link']), 1, 10],
+      ['HTML stands for?', JSON.stringify(['Hyper Text Markup Language', 'High Tech Modern Language', 'Hyper Transfer Markup Language', 'Home Tool Markup Language']), 0, 10],
+      ['Which CSS property sets text color?', JSON.stringify(['font-color', 'text-color', 'color', 'foreground']), 2, 10],
+      ['What does DOM stand for?', JSON.stringify(['Document Object Model', 'Data Object Method', 'Document Oriented Module', 'Dynamic Object Management']), 0, 10],
+      ['Which tag creates a hyperlink?', JSON.stringify(['<link>', '<a>', '<href>', '<url>']), 1, 10],
+      ['JavaScript is a ______ language.', JSON.stringify(['compiled', 'assembly', 'interpreted', 'machine']), 2, 10],
+    ];
+    for (let i = 0; i < 10; i++) insertQuestion.run(exam1, seedQuestions[i][0], seedQuestions[i][1], seedQuestions[i][2], seedQuestions[i][3]);
+    for (let i = 0; i < 5; i++) insertQuestion.run(exam2, seedQuestions[i][0], seedQuestions[i][1], seedQuestions[i][2], seedQuestions[i][3]);
+
+    const insertResult = db.prepare(
+      'INSERT INTO exam_results (exam_id, student_id, marks, answers) VALUES (?, ?, ?, ?)'
+    );
+    // Simulated answer sheets: a student got N right out of the first 10 questions,
+    // answering the remaining as "wrong" picks so the review screen looks realistic.
+    const makeAnswers = (rightCount, qids) => {
+      const ans = {};
+      qids.forEach((qid, idx) => {
+        const correctIdx = seedQuestions[idx % seedQuestions.length][2];
+        ans[qid] = idx < rightCount ? correctIdx : (correctIdx + 2) % 4;
+      });
+      return JSON.stringify(ans);
+    };
     const exam1Students = [0, 1, 4]; // enrolled in CS101
-    for (const s of exam1Students) {
-      insertResult.run(exam1, studentIds[s], 55 + Math.floor(Math.random() * 40));
-    }
+    const qids1 = db.prepare('SELECT id FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam1).map((q) => q.id);
+    const rightCounts1 = [8, 6, 7];
+    exam1Students.forEach((s, i) => {
+      insertResult.run(exam1, studentIds[s], rightCounts1[i] * 10, makeAnswers(rightCounts1[i], qids1));
+    });
     const exam2Students = [0, 2, 5]; // enrolled in CS201
-    for (const s of exam2Students) {
-      insertResult.run(exam2, studentIds[s], 50 + Math.floor(Math.random() * 45));
-    }
+    const qids2 = db.prepare('SELECT id FROM exam_questions WHERE exam_id = ? ORDER BY id').all(exam2).map((q) => q.id);
+    const rightCounts2 = [4, 3, 5];
+    exam2Students.forEach((s, i) => {
+      insertResult.run(exam2, studentIds[s], rightCounts2[i] * 10, makeAnswers(rightCounts2[i], qids2));
+    });
   }
 
   // ---- Certificates ----
@@ -962,6 +1049,40 @@ function seedModules() {
       const row = db.prepare('SELECT id FROM users WHERE username = ?').get(stu);
       if (row) insertRs.run(rid, row.id, stop, time);
     }
+  }
+
+  // ---- Syllabus (demo lesson plans for each course) ----
+  if (count('syllabus') === 0) {
+    const insertSyllabus = db.prepare(
+      'INSERT INTO syllabus (course_id, week_no, topic, description, objectives, status) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const sData = [
+      [0, 1, 'Python Basics', 'Variables, data types and operators', 'Write and run a first Python script', 'completed'],
+      [0, 2, 'Control Flow', 'Conditionals and loops', 'Implement if/else and for/while loops', 'in-progress'],
+      [0, 3, 'Functions', 'Defining and calling functions', 'Break problems into reusable functions', 'planned'],
+      [1, 1, 'HTML5 Fundamentals', 'Semantic markup and forms', 'Structure a valid HTML document', 'completed'],
+      [1, 2, 'CSS Styling', 'Selectors, box model and layout', 'Style a responsive page', 'in-progress'],
+      [2, 1, 'Intro to ML', 'What is machine learning', 'Distinguish supervised vs unsupervised', 'completed'],
+      [2, 2, 'Linear Models', 'Regression and gradient descent', 'Train a simple linear model', 'planned'],
+      [4, 1, 'Network Basics', 'IP addressing and TCP/IP model', 'Explain how packets route over the internet', 'in-progress'],
+    ];
+    for (const [ci, week, topic, desc, obj, status] of sData) {
+      insertSyllabus.run(courseIds[ci], week, topic, desc, obj, status);
+    }
+  }
+
+  // ---- Inventory / store demo ----
+  if (count('inventory_items') === 0) {
+    const insertInv = db.prepare(
+      'INSERT INTO inventory_items (branch_id, name, category, sku, quantity, unit, reorder_level, cost_price, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const ibid = defBranchId();
+    insertInv.run(ibid, 'A4 Paper Ream', 'Stationery', 'STN-A4-500', 120, 'ream', 40, 280, 'Double A, 80gsm');
+    insertInv.run(ibid, 'Ballpoint Pens (Box)', 'Stationery', 'STN-PEN-10', 60, 'box', 20, 120, 'Blue, box of 10');
+    insertInv.run(ibid, 'Whiteboard Markers', 'Stationery', 'STN-MKR-12', 35, 'box', 10, 210, 'Assorted colors');
+    insertInv.run(ibid, 'Uniform Shirt (M)', 'Uniforms', 'UNI-SHT-M', 25, 'pcs', 10, 450, 'White, half sleeves');
+    insertInv.run(ibid, 'Uniform Trouser (M)', 'Uniforms', 'UNI-TRS-M', 22, 'pcs', 10, 520, 'Navy blue');
+    insertInv.run(ibid, 'School Bag', 'Uniforms', 'UNI-BAG-1', 18, 'pcs', 8, 680, 'Backpack with logo');
   }
 }
 

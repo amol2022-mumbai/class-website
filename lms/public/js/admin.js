@@ -8,6 +8,7 @@ const tabTitles = {
   enquiries: ['// ADMIN / ENQUIRIES', 'Enquiry & Lead Funnel'],
   students: ['// ADMIN / STUDENTS', 'Student Records'],
   courses: ['// ADMIN / COURSES', 'Course Catalog'],
+  syllabus: ['// ADMIN / SYLLABUS', 'Course Syllabus'],
   enrollments: ['// ADMIN / ENROLLMENTS', 'Enrollment Matrix'],
   batches: ['// ADMIN / BATCHES', 'Batches & Timetable'],
   faculty: ['// ADMIN / FACULTY', 'Faculty Members'],
@@ -26,6 +27,7 @@ const tabTitles = {
   notices: ['// ADMIN / NOTICES', 'Notices & Announcements'],
   vendors: ['// ADMIN / VENDORS', 'Vendors, Purchases & GST'],
   assets: ['// ADMIN / ASSETS', 'Assets & Inventory'],
+  inventory: ['// ADMIN / INVENTORY', 'Inventory & Stock'],
   reportcards: ['// ADMIN / REPORT CARDS', 'Student Report Cards'],
   idcards: ['// ADMIN / ID CARDS', 'Student ID Cards'],
   backup: ['// ADMIN / BACKUP', 'Backup & Restore'],
@@ -114,6 +116,7 @@ function switchTab(tab) {
   else if (tab === 'enquiries') loadEnquiries();
   else if (tab === 'students') loadStudents();
   else if (tab === 'courses') loadCourses();
+  else if (tab === 'syllabus') loadSyllabus();
   else if (tab === 'enrollments') loadEnrollments();
   else if (tab === 'batches') loadBatches();
   else if (tab === 'faculty') loadFaculty();
@@ -132,6 +135,7 @@ function switchTab(tab) {
   else if (tab === 'notices') loadNotices();
   else if (tab === 'vendors') { loadVendors(); loadPurchases(); loadGstSummary(); }
   else if (tab === 'assets') loadAssets();
+  else if (tab === 'inventory') { loadInventory(); loadInventoryTx(); }
   else if (tab === 'reportcards') { loadCardStudents('rcStudentSelect'); }
   else if (tab === 'idcards') { loadCardStudents('idcStudentSelect'); }
   else if (tab === 'backup') clearBackupHint();
@@ -311,10 +315,50 @@ function renderCharts(c) {
   document.getElementById('courseDonut').innerHTML =
     `<div style="flex:1">${tc.map(t => `
        <div class="legend"><span class="legend-dot" style="background:var(--purple)"></span>${esc(t.title)} <b>${t.students}</b></div>
-     `).join('') || '<span class="muted">No enrollments</span>'}</div>
+      `).join('') || '<span class="muted">No enrollments</span>'}</div>
      <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:10px">
        ${tc.map(t => barRow(esc(t.title), t.students / tcMax, 'var(--purple)')).join('')}
      </div>`;
+
+  // Attendance trend (per-day percentage, last 30 days).
+  const at = c.attendance_trend || [];
+  const atMax = Math.max(1, ...at.map(a => a.pct));
+  const elAtt = document.getElementById('attendanceBars');
+  if (elAtt) {
+    elAtt.innerHTML = at.length
+      ? at.map(a => `
+        <div class="bar-col">
+          <div class="bar-val">${a.pct}%</div>
+          <div class="bar" style="height:${Math.round((a.pct / atMax) * 100)}%"></div>
+          <div class="bar-lbl">${a.date.slice(5)}</div>
+        </div>`).join('')
+      : '<span class="muted">No attendance recorded yet</span>';
+  }
+
+  // Income vs expense bars.
+  const ive = c.income_vs_expense || [];
+  const iveMax = Math.max(1, ...ive.flatMap(m => [m.income, m.expense]));
+  const elIe = document.getElementById('incomeExpenseDonut');
+  if (elIe) {
+    elIe.innerHTML = ive.length
+      ? ive.map(m => `
+        <div class="legend"><span class="legend-dot" style="background:var(--green)"></span>${m.month} Income <b>${fmtMoney(m.income)}</b>
+          <span style="margin-left:8px"><span class="legend-dot" style="background:var(--red)"></span>Expense <b>${fmtMoney(m.expense)}</b></span></div>
+        <div style="width:100%">
+          ${barRow('Income', m.income / iveMax, 'var(--green)')}
+          ${barRow('Expense', m.expense / iveMax, 'var(--red)')}
+        </div>`).join('')
+      : '<span class="muted">No income/expense data</span>';
+  }
+
+  // Academic performance: pass rate + assignment completion.
+  const elAc = document.getElementById('academicDonut');
+  if (elAc) {
+    elAc.innerHTML = `
+      <div class="legend"><span class="legend-dot" style="background:var(--cyan)"></span>Exam pass rate <b>${c.pass_rate || 0}%</b></div>
+      <div style="width:100%">${barRow('Exam pass rate', (c.pass_rate || 0) / 100, 'var(--cyan)')}</div>
+      <div class="legend" style="margin-top:10px"><span class="legend-dot" style="background:var(--yellow)"></span>Assignments submitted <b>${c.assignment_submissions || 0}</b></div>`;
+  }
 }
 
 function barRow(label, pct, color) {
@@ -820,6 +864,106 @@ async function deleteCourse(id, code) {
     await api('/api/admin/courses/' + id, { method: 'DELETE' });
     toast('Course deleted');
     loadCourses();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Syllabus ----------
+let syllabusCache = [];
+
+async function loadSyllabus() {
+  try {
+    syllabusCache = await api('/api/admin/syllabus');
+    const filter = Number(document.getElementById('syllabusCourseFilter').value) || 0;
+    const courses = window._courses || await api('/api/admin/courses');
+    window._courses = courses;
+    const filterSel = document.getElementById('syllabusCourseFilter');
+    const current = Number(filterSel.value) || 0;
+    filterSel.innerHTML = '<option value="">All Courses</option>' + courses.map(c =>
+      `<option value="${c.id}">${esc(c.code)} — ${esc(c.title)}</option>`).join('');
+    filterSel.value = current;
+
+    const rows = syllabusCache.filter(s => !filter || s.course_id === filter);
+    document.getElementById('syllabusRows').innerHTML = rows.length ? rows.map(s => `
+      <tr>
+        <td><span class="badge badge-cyan">${esc(s.course_code)}</span><div class="muted">${esc(s.course_title)}</div></td>
+        <td><strong>Week ${s.week_no}</strong></td>
+        <td><strong>${esc(s.topic)}</strong><div class="muted">${esc(s.objectives || '')}</div><div class="muted">${esc(s.description || '')}</div></td>
+        <td><span class="badge ${s.status === 'completed' ? 'badge-green' : s.status === 'in-progress' ? 'badge-yellow' : 'badge-cyan'}">${esc(s.status)}</span></td>
+        <td class="table-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openSyllabusModal(${s.id})">EDIT</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSyllabus(${s.id}, '${esc(s.topic)}')">DEL</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">▦</span>No syllabus entries yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openSyllabusModal(id) {
+  const s = syllabusCache.find(x => x.id === id) || {};
+  const courses = window._courses || [];
+  showModal(s.id ? 'Edit Syllabus — Week ' + s.week_no : 'Add Syllabus Week', `
+    <form id="syllabusForm">
+      <div class="form-grid">
+        <div class="field">
+          <label>Course</label>
+          <select name="course_id" ${s.id ? 'disabled' : 'required'}>
+            ${courses.map(c => `<option value="${c.id}" ${s.course_id === c.id ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Week No</label>
+          <input type="number" name="week_no" min="1" required value="${s.week_no || 1}">
+        </div>
+        <div class="field span-2">
+          <label>Topic</label>
+          <input type="text" name="topic" required value="${esc(s.topic || '')}" placeholder="e.g. Functions & Recursion">
+        </div>
+        <div class="field span-2">
+          <label>Objectives</label>
+          <input type="text" name="objectives" value="${esc(s.objectives || '')}" placeholder="e.g. Understand function scope, write recursive functions">
+        </div>
+        <div class="field span-2">
+          <label>Description</label>
+          <textarea name="description" rows="2" placeholder="Detailed notes / reading material">${esc(s.description || '')}</textarea>
+        </div>
+        <div class="field span-2">
+          <label>Status</label>
+          <select name="status">
+            <option value="planned" ${s.status === 'planned' ? 'selected' : ''}>Planned</option>
+            <option value="in-progress" ${s.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
+            <option value="completed" ${s.status === 'completed' ? 'selected' : ''}>Completed</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${s.id ? 'SAVE CHANGES' : 'ADD WEEK'}</button>
+      </div>
+    </form>`);
+  document.getElementById('syllabusForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      course_id: s.id ? s.course_id : Number(f.get('course_id')),
+      week_no: Number(f.get('week_no')) || 1,
+      topic: f.get('topic'), description: f.get('description'),
+      objectives: f.get('objectives'), status: f.get('status'),
+    };
+    try {
+      if (s.id) await api('/api/admin/syllabus/' + s.id, { method: 'PUT', body });
+      else await api('/api/admin/syllabus', { method: 'POST', body });
+      toast(s.id ? 'Syllabus updated' : 'Syllabus week added');
+      closeModal();
+      loadSyllabus();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteSyllabus(id, topic) {
+  if (!confirm(`Delete syllabus entry "${topic}"?`)) return;
+  try {
+    await api('/api/admin/syllabus/' + id, { method: 'DELETE' });
+    toast('Syllabus entry deleted');
+    loadSyllabus();
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1857,6 +2001,7 @@ async function loadExams() {
       <td><strong>${esc(x.title)}</strong></td>
       <td><span class="badge badge-cyan">${esc(x.course_code)}</span></td>
       <td class="muted">${esc(x.exam_date || '—')}</td>
+      <td>${x.available_from || x.available_to ? `<span class="badge badge-yellow">${x.available_from ? new Date(x.available_from).toLocaleDateString() : 'open'} → ${x.available_to ? new Date(x.available_to).toLocaleDateString() : 'no close'}</span>` : '<span class="badge badge-green">Always</span>'}</td>
       <td>${x.max_marks}</td>
       <td>${x.question_count ? `${x.question_count} Q` : '—'}${x.duration_minutes ? ` · ${x.duration_minutes} min` : ''}</td>
       <td><span class="badge badge-purple">${x.result_count}</span> <button class="btn btn-ghost btn-sm" onclick="showExamResults(${x.id}, '${esc(x.title)}')">ENTER</button></td>
@@ -1896,6 +2041,14 @@ function openExamModal(exam) {
           <label>Exam Date</label>
           <input type="date" name="exam_date" value="${esc(exam ? exam.exam_date || '' : '')}">
         </div>
+        <div class="field">
+          <label>Opens (datetime-local)</label>
+          <input type="datetime-local" name="available_from" value="${exam && exam.available_from ? toLocalInput(exam.available_from) : ''}">
+        </div>
+        <div class="field">
+          <label>Closes (datetime-local)</label>
+          <input type="datetime-local" name="available_to" value="${exam && exam.available_to ? toLocalInput(exam.available_to) : ''}">
+        </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
@@ -1906,7 +2059,11 @@ function openExamModal(exam) {
   document.getElementById('examForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const payload = { title: f.get('title'), exam_date: f.get('exam_date') || null, max_marks: Number(f.get('max_marks')) || 100, duration_minutes: Number(f.get('duration_minutes')) || 0 };
+    const payload = {
+      title: f.get('title'), exam_date: f.get('exam_date') || null,
+      max_marks: Number(f.get('max_marks')) || 100, duration_minutes: Number(f.get('duration_minutes')) || 0,
+      available_from: toUtcIso(f.get('available_from')), available_to: toUtcIso(f.get('available_to')),
+    };
     try {
       if (isEdit) {
         await api('/api/admin/exams/' + exam.id, { method: 'PUT', body: payload });
@@ -2870,6 +3027,142 @@ async function deleteAsset(id, name) {
     await api('/api/admin/assets/' + id, { method: 'DELETE' });
     toast('Asset deleted');
     loadAssets();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Inventory ----------
+let inventoryCache = [];
+
+async function loadInventory() {
+  try {
+    inventoryCache = await api('/api/admin/inventory');
+    document.getElementById('inventoryRows').innerHTML = inventoryCache.length ? inventoryCache.map(i => `
+      <tr>
+        <td><strong>${esc(i.name)}</strong><br><span class="muted">${esc(i.note || '')}</span></td>
+        <td class="muted">${esc(i.category || '—')}</td>
+        <td class="muted">${esc(i.sku || '—')}</td>
+        <td><strong>${i.quantity}</strong> ${esc(i.unit || 'pcs')}${Number(i.quantity) <= Number(i.reorder_level) && Number(i.reorder_level) > 0 ? ' <span class="badge badge-red">LOW</span>' : ''}</td>
+        <td class="muted">${esc(i.unit || 'pcs')}</td>
+        <td>${fmtMoney(i.cost_price)}</td>
+        <td class="muted">${i.reorder_level || 0}</td>
+        <td class="table-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openInventoryModal(${i.id})">EDIT</button>
+          <button class="btn btn-purple btn-sm" onclick="openTransactModal(${i.id})">STOCK</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteInventory(${i.id}, '${esc(i.name)}')">DEL</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="8"><div class="empty-state"><span class="es-icon">≋</span>No inventory items yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function openInventoryModal(id) {
+  const i = inventoryCache.find(x => x.id === id) || {};
+  showModal(i.id ? 'Edit Inventory Item' : 'Add Inventory Item', `
+    <form id="inventoryForm">
+      <div class="form-grid">
+        <div class="field span-2"><label>Item Name</label><input type="text" name="name" required value="${esc(i.name || '')}"></div>
+        <div class="field"><label>Category</label><input type="text" name="category" value="${esc(i.category || '')}" placeholder="Stationery, Uniforms..."></div>
+        <div class="field"><label>SKU</label><input type="text" name="sku" value="${esc(i.sku || '')}"></div>
+        <div class="field"><label>Quantity</label><input type="number" name="quantity" min="0" step="1" value="${i.id ? i.quantity : 0}"></div>
+        <div class="field"><label>Unit</label><input type="text" name="unit" value="${esc(i.unit || 'pcs')}" placeholder="pcs, sets, boxes..."></div>
+        <div class="field"><label>Reorder Level</label><input type="number" name="reorder_level" min="0" step="1" value="${i.reorder_level || 0}"></div>
+        <div class="field"><label>Cost Price (Rs.)</label><input type="number" name="cost_price" min="0" step="0.01" value="${i.cost_price || 0}"></div>
+        <div class="field span-2"><label>Note</label><input type="text" name="note" value="${esc(i.note || '')}"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">${i.id ? 'SAVE CHANGES' : 'ADD ITEM'}</button>
+      </div>
+    </form>`);
+  document.getElementById('inventoryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      name: f.get('name'), category: f.get('category'), sku: f.get('sku'),
+      unit: f.get('unit'), reorder_level: Number(f.get('reorder_level')) || 0,
+      cost_price: Number(f.get('cost_price')) || 0, note: f.get('note'),
+    };
+    try {
+      if (i.id) {
+        await api('/api/admin/inventory/' + i.id, { method: 'PUT', body });
+      } else {
+        body.quantity = Number(f.get('quantity')) || 0;
+        await api('/api/admin/inventory', { method: 'POST', body });
+      }
+      toast(i.id ? 'Item updated' : 'Item added');
+      closeModal();
+      loadInventory(); loadInventoryTx();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+function openTransactModal(id) {
+  const i = inventoryCache.find(x => x.id === id) || {};
+  showModal('Stock Movement — ' + (i.name || 'Item'), `
+    <form id="transactForm">
+      <div class="form-grid">
+        <div class="field span-2"><label>Item</label>
+          <select name="item_id">
+            ${inventoryCache.map(x => `<option value="${x.id}" ${x.id === id ? 'selected' : ''}>${esc(x.name)} (${x.quantity} ${esc(x.unit || 'pcs')})</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Type</label>
+          <select name="type">
+            <option value="in">Stock In (Received)</option>
+            <option value="out">Stock Out (Issued)</option>
+            <option value="adjust">Adjust (Set Count)</option>
+          </select>
+        </div>
+        <div class="field"><label>Quantity</label><input type="number" name="change" min="1" step="1" required placeholder="e.g. 10"></div>
+        <div class="field span-2"><label>Note</label><input type="text" name="note" placeholder="e.g. Weekly replenishment, issued to class"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
+        <button type="submit" class="btn btn-purple">RECORD MOVEMENT</button>
+      </div>
+    </form>`);
+  document.getElementById('transactForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = {
+      item_id: Number(f.get('item_id')),
+      type: f.get('type'),
+      change: f.get('type') === 'adjust' ? Number(f.get('change')) : (f.get('type') === 'out' ? -Number(f.get('change')) : Number(f.get('change'))),
+      note: f.get('note'),
+    };
+    try {
+      await api('/api/admin/inventory/' + body.item_id + '/transact', { method: 'POST', body });
+      toast('Stock updated');
+      closeModal();
+      loadInventory(); loadInventoryTx();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+async function deleteInventory(id, name) {
+  if (!confirm(`Delete inventory item "${name}"?`)) return;
+  try {
+    await api('/api/admin/inventory/' + id, { method: 'DELETE' });
+    toast('Item deleted');
+    loadInventory(); loadInventoryTx();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadInventoryTx() {
+  try {
+    const all = [];
+    for (const i of inventoryCache) {
+      const tx = await api('/api/admin/inventory/' + i.id + '/transactions');
+      all.push(...tx);
+    }
+    all.sort((a, b) => b.id - a.id);
+    document.getElementById('inventoryTxRows').innerHTML = all.length ? all.slice(0, 50).map(t => `
+      <tr>
+        <td class="muted">${esc(t.created_at || t.timestamp || '')}</td>
+        <td><strong>${esc(t.item_name)}</strong></td>
+        <td><span class="badge ${t.type === 'in' ? 'badge-green' : t.type === 'out' ? 'badge-red' : 'badge-yellow'}">${esc(t.type)}</span></td>
+        <td>${t.type === 'out' ? '-' : '+'}${t.change}</td>
+        <td class="muted">${esc(t.note || '—')}</td>
+      </tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">≋</span>No stock movements yet.</div></td></tr>';
   } catch (err) { toast(err.message, true); }
 }
 

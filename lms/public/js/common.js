@@ -71,6 +71,48 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Convert a server ISO string to a datetime-local input value (local time).
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Convert a datetime-local input value to a UTC ISO string (or null if empty).
+function toUtcIso(localValue) {
+  if (!localValue) return null;
+  const d = new Date(localValue);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Download helper: turns a base64 payload from the server into a real file.
+function downloadFromB64(name, base64) {
+  if (!base64) return;
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// Read a file input and resolve with { name, data } where data is base64.
+function fileToBase64(file, cb) {
+  if (!file) return cb(null);
+  const reader = new FileReader();
+  reader.onload = () => cb({ name: file.name, data: String(reader.result).split(',')[1] || '' });
+  reader.onerror = () => cb(null);
+  reader.readAsDataURL(file);
+}
+
 // ---------- Mobile navigation (off-canvas drawer) ----------
 function toggleSidebar() {
   document.querySelector('.dash').classList.toggle('sidebar-open');
