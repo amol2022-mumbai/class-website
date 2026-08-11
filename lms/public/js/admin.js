@@ -451,6 +451,17 @@ function openStudentModal(student) {
             <option value="0" ${!student || !student.fee_paid ? 'selected' : ''}>No — pending</option>
           </select>
         </div>
+        <div class="field span-2">
+          <label>Student Photo (shows on ID card)</label>
+          <div style="display:flex;gap:12px;align-items:center">
+            <div id="photoPreview" class="photo-preview">${esc((student && student.name || ' ')[0] || ' ')}</div>
+            <div style="flex:1">
+              <input type="file" id="studentPhotoInput" accept="image/*">
+              <small class="muted">JPG/PNG up to ~2MB.</small>
+              ${student && student.has_photo ? '<div style="margin-top:6px"><button type="button" class="btn btn-ghost btn-sm" id="removePhotoBtn">REMOVE PHOTO</button></div>' : ''}
+            </div>
+          </div>
+        </div>
         ${isEdit ? `
         <div class="field span-2">
           <label>Reset Password (leave blank to keep)</label>
@@ -474,21 +485,47 @@ function openStudentModal(student) {
       fee_installments: Number(f.get('fee_installments')) || 1,
       fee_start_date: f.get('fee_start_date') || undefined,
     };
+    const photoInput = document.getElementById('studentPhotoInput');
     try {
-      if (isEdit) {
-        if (f.get('password')) payload.password = f.get('password');
-        await api('/api/admin/students/' + student.id, { method: 'PUT', body: payload });
-      } else {
-        await api('/api/admin/students', { method: 'POST', body: {
-          username: f.get('username'), password: f.get('password'),
-          ...payload,
-        }});
-      }
-      toast(isEdit ? 'Student updated' : 'Student created');
-      closeModal();
-      loadStudents();
+      await fileToBase64(photoInput && photoInput.files[0], async (photo) => {
+        if (photo) { payload.photo_data = photo.data; payload.photo_name = photo.name; }
+        if (isEdit) {
+          if (window._removePhoto) payload.remove_photo = true;
+          if (f.get('password')) payload.password = f.get('password');
+          await api('/api/admin/students/' + student.id, { method: 'PUT', body: payload });
+        } else {
+          await api('/api/admin/students', { method: 'POST', body: {
+            username: f.get('username'), password: f.get('password'),
+            ...payload,
+          }});
+        }
+        toast(isEdit ? 'Student updated' : 'Student created');
+        closeModal();
+        loadStudents();
+      });
     } catch (err) { toast(err.message, true); }
   });
+
+  const photoInput = document.getElementById('studentPhotoInput');
+  if (photoInput) {
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files[0];
+      if (!file) return;
+      fileToBase64(file, (photo) => {
+        const preview = document.getElementById('photoPreview');
+        if (photo && preview) preview.innerHTML = `<img src="data:${file.type};base64,${photo.data}" alt="">`;
+      });
+    });
+  }
+  const removeBtn = document.getElementById('removePhotoBtn');
+  if (removeBtn) {
+    removeBtn.addEventListener('click', () => {
+      window._removePhoto = true;
+      document.getElementById('photoPreview').innerHTML = esc((student && student.name || ' ')[0] || ' ');
+      document.getElementById('studentPhotoInput').value = '';
+      removeBtn.remove();
+    });
+  }
 }
 
 async function deleteStudent(id, name) {
@@ -1492,6 +1529,7 @@ let activeBatchId = null;
 async function loadBatches() {
   const [batches, courses] = await Promise.all([api('/api/admin/batches'), api('/api/admin/courses')]);
   window._courses = courses;
+  window._batches = batches;
   document.getElementById('batchRows').innerHTML = batches.length ? batches.map(b => `
     <tr>
       <td><strong>${esc(b.name)}</strong></td>
@@ -1593,9 +1631,10 @@ function renderBatchDetail(d) {
       <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
       <td><strong>${esc(t.subject)}</strong></td>
       <td class="muted">${esc(t.instructor || '—')}</td>
+      <td>${t.meeting_link ? `<a class="btn btn-purple btn-xs" href="${esc(t.meeting_link)}" target="_blank" rel="noopener">JOIN</a>` : '—'}</td>
       <td><button class="btn btn-danger btn-sm" onclick="deleteTimetableSlot(${t.id})">DEL</button></td>
     </tr>
-  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No slots. Add a slot below.</div></td></tr>';
+  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>No slots. Add a slot below.</div></td></tr>';
 
   document.getElementById('batchStudentRows').innerHTML = d.students.length ? d.students.map(s => `
     <tr>
@@ -1660,6 +1699,10 @@ function openTimetableModal() {
           <label>Instructor</label>
           <input type="text" name="instructor" placeholder="e.g. Dr. Alan Vega">
         </div>
+        <div class="field span-2">
+          <label>Online Class Link (optional)</label>
+          <input type="url" name="meeting_link" placeholder="https://meet.google.com/... or Zoom URL">
+        </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
@@ -1674,6 +1717,7 @@ function openTimetableModal() {
       await api('/api/admin/timetable', { method: 'POST', body: {
         batch_id: activeBatchId, day: f.get('day'), subject: f.get('subject'),
         start_time: f.get('start_time'), end_time: f.get('end_time'), instructor: f.get('instructor'),
+        meeting_link: f.get('meeting_link') || null,
       }});
       toast('Timetable slot added');
       closeModal();
@@ -2732,11 +2776,19 @@ let noticeCache = [];
 async function loadNotices() {
   try {
     noticeCache = await api('/api/admin/notices');
+    if (!window._courses) window._courses = await api('/api/admin/courses');
+    if (!window._batches) window._batches = await api('/api/admin/batches');
     document.getElementById('noticeGrid').innerHTML = noticeCache.length ? noticeCache.map(n => `
       <div class="notice-card">
         <h3>${esc(n.title)}</h3>
-        <div class="nc-meta">Published ${esc(n.publish_date || '—')}${n.expires_on ? ' · Expires ' + esc(n.expires_on) : ''}</div>
+        <div class="nc-meta">Published ${esc(n.publish_date || '—')}${n.expires_on ? ' · Expires ' + esc(n.expires_on) : ''}
+          <div style="margin-top:6px">
+            <span class="badge ${n.course_id ? 'badge-purple' : 'badge-cyan'}">${n.course_id ? `${esc(n.course_code)}` : 'ALL COURSES'}</span>
+            ${n.batch_id ? `<span class="badge badge-purple">${esc(n.batch_name)}</span>` : ''}
+          </div>
+        </div>
         <div class="nc-body">${esc(n.body || '')}</div>
+        ${n.meeting_link ? `<div style="margin-top:10px"><a class="btn btn-purple btn-sm" href="${esc(n.meeting_link)}" target="_blank" rel="noopener">JOIN ONLINE CLASS</a></div>` : ''}
         <div class="nc-actions">
           <button class="btn btn-ghost btn-sm" onclick="openNoticeModal(${n.id})">EDIT</button>
           <button class="btn btn-danger btn-sm" onclick="deleteNotice(${n.id}, '${esc(n.title)}')">DELETE</button>
@@ -2747,6 +2799,12 @@ async function loadNotices() {
 
 function openNoticeModal(id) {
   const n = noticeCache.find(x => x.id === id) || {};
+  const courses = window._courses || [];
+  const batches = window._batches || [];
+  const courseOpts = courses.map(c =>
+    `<option value="${c.id}" ${n.course_id === c.id ? 'selected' : ''}>${esc(c.code)} — ${esc(c.title)}</option>`).join('');
+  const batchOpts = batches.filter(b => !n.course_id || b.course_id === n.course_id).map(b =>
+    `<option value="${b.id}" ${n.batch_id === b.id ? 'selected' : ''}>${esc(b.name)} (${esc(b.course_code)})</option>`).join('');
   showModal(n.id ? 'Edit Notice' : 'Add Notice', `
     <form id="noticeForm">
       <div class="form-grid">
@@ -2766,18 +2824,48 @@ function openNoticeModal(id) {
           <label>Expires On (optional)</label>
           <input type="date" name="expires_on" value="${esc(n.expires_on || '')}">
         </div>
+        <div class="field">
+          <label>Target Course (optional)</label>
+          <select name="course_id" id="noticeCourse">
+            <option value="">All Courses</option>
+            ${courseOpts}
+          </select>
+          <small class="muted">Leave blank to send to everyone.</small>
+        </div>
+        <div class="field">
+          <label>Target Batch (optional)</label>
+          <select name="batch_id" id="noticeBatch">
+            <option value="">All Batches</option>
+            ${batchOpts}
+          </select>
+          <small class="muted">Requires a course selected above.</small>
+        </div>
+        <div class="field span-2">
+          <label>Online Class Link (optional)</label>
+          <input type="url" name="meeting_link" value="${esc(n.meeting_link || '')}" placeholder="https://meet.google.com/... or Zoom URL">
+        </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal()">CANCEL</button>
         <button type="submit" class="btn btn-purple">${n.id ? 'SAVE CHANGES' : 'ADD NOTICE'}</button>
       </div>
     </form>`);
+  document.getElementById('noticeCourse').addEventListener('change', (e) => {
+    const cid = Number(e.target.value) || 0;
+    const batchSel = document.getElementById('noticeBatch');
+    batchSel.innerHTML = '<option value="">All Batches</option>' + batches
+      .filter(b => !cid || b.course_id === cid)
+      .map(b => `<option value="${b.id}">${esc(b.name)} (${esc(b.course_code)})</option>`).join('');
+    batchSel.value = n.batch_id && (!cid || batches.find(b => b.id === n.batch_id)?.course_id === cid) ? n.batch_id : '';
+  });
   document.getElementById('noticeForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     const body = {
       title: f.get('title'), body: f.get('body'),
       publish_date: f.get('publish_date') || null, expires_on: f.get('expires_on') || null,
+      meeting_link: f.get('meeting_link') || null,
+      course_id: f.get('course_id') || null, batch_id: f.get('batch_id') || null,
     };
     try {
       if (n.id) await api('/api/admin/notices/' + n.id, { method: 'PUT', body });
@@ -3253,7 +3341,7 @@ function renderIdCard(ic) {
       <div class="id-card">
         <div class="id-top">
           <div class="id-brand">VUMCA <span class="accent">hITECH</span></div>
-          <div class="id-photo">${esc((ic.student.name || ' ')[0] || ' ')}</div>
+          <div class="id-photo">${photoHtml(ic.student.photo_data, ic.student.name)}</div>
         </div>
         <div class="id-name">${esc(ic.student.name)}</div>
         <div class="id-row">

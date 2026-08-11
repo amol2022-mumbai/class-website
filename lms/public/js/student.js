@@ -114,11 +114,93 @@ async function loadCourses() {
         <span class="badge badge-cyan">${c.weeks} weeks</span>
         <span class="badge badge-green">${esc(c.instructor || 'TBA')}</span>
       </div>
-      <div class="progress">
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-purple btn-sm" onclick="openStudentDiscussion(${c.id}, '${esc(c.code)}')">Q&A BOARD</button>
+      </div>
+      <div class="progress" style="margin-top:10px">
         <div class="progress-bar" style="width:${Math.min(100, c.assignment_count ? 50 : 25)}%"></div>
       </div>
     </div>
   `).join('') : '<div class="empty-state"><span class="es-icon">⬡</span>No courses enrolled.</div>';
+}
+
+// ---------- Class discussion / Q&A board ----------
+function discussionCard(p, mine, faculty) {
+  const role = p.author_role === 'faculty' ? '<span class="badge badge-green">FACULTY</span>' : '';
+  const answered = (p.replies || []).some(r => r.author_role === 'faculty') ? ' <span class="badge badge-green">ANSWERED</span>' : '';
+  return `
+    <div class="disc-post">
+      <div class="disc-head">
+        <strong>${esc(p.author_name)}</strong> ${role} ${answered}
+        <span class="muted">${esc((p.created_at || '').replace('T', ' ').slice(0, 16))}</span>
+      </div>
+      <div class="disc-body">${esc(p.body)}</div>
+      <div class="disc-foot">
+        <button class="btn ${p.voted ? 'btn-purple' : 'btn-ghost'} btn-xs" onclick="voteDiscussion(${p.id})">▲ ${p.upvotes}${p.voted ? ' · Upvoted' : ' Upvote'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="replyTo('${esc(p.author_name)}', ${p.id})">REPLY</button>
+      </div>
+      ${(p.replies || []).length ? `<div class="disc-replies">${p.replies.map(r => `
+        <div class="disc-post disc-reply">
+          <div class="disc-head">
+            <strong>${esc(r.author_name)}</strong> ${r.author_role === 'faculty' ? '<span class="badge badge-green">FACULTY</span>' : ''}
+            <span class="muted">${esc((r.created_at || '').replace('T', ' ').slice(0, 16))}</span>
+          </div>
+          <div class="disc-body">${esc(r.body)}</div>
+          <div class="disc-foot">
+            <button class="btn ${r.voted ? 'btn-purple' : 'btn-ghost'} btn-xs" onclick="voteDiscussion(${r.id})">▲ ${r.upvotes}${r.voted ? ' · Upvoted' : ' Upvote'}</button>
+          </div>
+        </div>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+let activeDiscussionCourse = null;
+
+async function openStudentDiscussion(courseId, code) {
+  activeDiscussionCourse = courseId;
+  showModal(code + ' — Q&A Board', `<div id="discussionWrap" style="min-height:120px"><div class="empty-state"><span class="es-icon">◌</span>Loading...</div></div>`);
+  await loadStudentDiscussion();
+}
+
+async function loadStudentDiscussion() {
+  try {
+    const d = await api('/api/student/courses/' + activeDiscussionCourse + '/discussion');
+    const wrap = document.getElementById('discussionWrap');
+    wrap.innerHTML = `
+      <form id="discussionForm" style="margin-bottom:16px">
+        <div style="display:flex;gap:8px">
+          <input type="text" id="discussionInput" class="input" placeholder="Ask a question about this course..." required>
+          <button type="submit" class="btn btn-purple">ASK</button>
+        </div>
+      </form>
+      ${d.posts.length ? d.posts.map(p => discussionCard(p, true, false)).join('') : '<div class="empty-state"><span class="es-icon">▦</span>No questions yet. Be the first to ask.</div>'}`;
+    document.getElementById('discussionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = document.getElementById('discussionInput').value.trim();
+      if (!body) return;
+      const parentId = window._replyTarget;
+      window._replyTarget = null;
+      try {
+        await api('/api/student/courses/' + activeDiscussionCourse + '/discussion', { method: 'POST', body: { body, parent_id: parentId } });
+        await loadStudentDiscussion();
+      } catch (err) { toast(err.message, true); }
+    });
+    window._replyTarget = null;
+  } catch (err) { toast(err.message, true); }
+}
+
+function replyTo(author, parentId) {
+  const input = document.getElementById('discussionInput');
+  if (!input) return;
+  window._replyTarget = parentId;
+  input.value = '@' + author + ' ';
+  input.focus();
+}
+
+async function voteDiscussion(id) {
+  try {
+    await api('/api/student/discussion/' + id + '/vote', { method: 'POST' });
+    await loadStudentDiscussion();
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------- Syllabus ----------
@@ -204,8 +286,9 @@ function renderStuTimetable() {
         <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
         <td>${esc(t.course_code)}</td>
         <td class="muted">${esc(t.instructor || '—')}</td>
+        <td>${t.meeting_link ? `<a class="btn btn-purple btn-sm" href="${esc(t.meeting_link)}" target="_blank" rel="noopener">JOIN</a>` : ''}</td>
       </tr>
-    `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>';
+    `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>';
   }
 }
 
@@ -238,6 +321,7 @@ function renderStuWeekGrid() {
         <div class="tt-cell">
           <div class="tt-subject">${esc(t.subject)}</div>
           <div class="tt-meta">${esc(t.course_code)} · ${esc(t.instructor || t.batch_name)}</div>
+          ${t.meeting_link ? `<a class="btn btn-purple btn-xs" href="${esc(t.meeting_link)}" target="_blank" rel="noopener">JOIN</a>` : ''}
         </div>
       `).join('') : '';
       tr.appendChild(td);
@@ -812,8 +896,12 @@ async function loadStudentNotices() {
     document.getElementById('studentNotices').innerHTML = notices.length ? notices.map(n => `
       <div class="notice-item">
         <h3>${esc(n.title)}</h3>
-        <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
+        <div class="ni-meta">Published ${esc(n.publish_date || '—')}
+          ${n.course_id ? `<span class="badge badge-purple" style="margin-left:6px">${esc(n.course_code)}</span>` : ''}
+          ${n.batch_id ? `<span class="badge badge-purple">${esc(n.batch_name)}</span>` : ''}
+        </div>
         <div class="ni-body">${esc(n.body || '')}</div>
+        ${n.meeting_link ? `<div style="margin-top:10px"><a class="btn btn-purple btn-sm" href="${esc(n.meeting_link)}" target="_blank" rel="noopener">JOIN ONLINE CLASS</a></div>` : ''}
         ${n.has_attachment ? `<div style="margin-top:10px"><button class="btn btn-purple btn-sm" onclick="downloadCircular(${n.id})">DOWNLOAD CIRCULAR (${esc(n.attachment_name || 'PDF')})</button></div>` : ''}
       </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
   } catch (err) { toast(err.message, true); }
@@ -968,7 +1056,7 @@ function renderStudentIdcard(ic) {
       <div class="id-card">
         <div class="id-top">
           <div class="id-brand">VUMCA <span class="accent">hITECH</span></div>
-          <div class="id-photo">${esc((ic.student.name || ' ')[0] || ' ')}</div>
+          <div class="id-photo">${photoHtml(ic.student.photo_data, ic.student.name)}</div>
         </div>
         <div class="id-name">${esc(ic.student.name)}</div>
         <div class="id-row">

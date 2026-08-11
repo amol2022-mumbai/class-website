@@ -404,6 +404,21 @@ td .muted { color: var(--text-muted); font-size: 13px; }
 .progress { height: 8px; background: var(--bg-elevated); border-radius: 10px; overflow: hidden; min-width: 100px; }
 .progress-bar { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 10px; }
 
+/* Photo preview + ID card photo image */
+.photo-preview { width: 64px; height: 72px; border: 2px dashed var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); color: var(--text-dim); font-size: 22px; font-weight: 700; overflow: hidden; flex-shrink: 0; }
+.photo-preview img, .id-photo-img { width: 100%; height: 100%; object-fit: cover; }
+.id-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+.btn-xs { padding: 2px 8px; font-size: 11px; }
+
+/* Discussion / Q&A board */
+.disc-post { border: 1px solid var(--border); border-left: 3px solid var(--purple); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: var(--panel-bg); }
+.disc-post.disc-reply { border-left-color: var(--cyan); margin-top: 8px; background: var(--bg-elevated); }
+.disc-replies { margin: 10px 0 0 18px; padding-left: 10px; border-left: 2px solid var(--border); }
+.disc-head { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 6px; flex-wrap: wrap; }
+.disc-body { font-size: 14px; line-height: 1.5; margin-bottom: 8px; white-space: pre-wrap; }
+.disc-foot { display: flex; gap: 8px; }
+
 /* Timetable week grid */
 .timetable-grid { border-collapse: collapse; width: 100%; min-width: 760px; }
 .timetable-grid th, .timetable-grid td { border: 1px solid var(--border); padding: 10px; text-align: left; vertical-align: top; }

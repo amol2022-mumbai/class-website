@@ -78,6 +78,9 @@ async function loadCourses() {
         <span class="badge badge-cyan">${c.student_count} students</span>
         <span class="badge badge-green">${c.batch_name ? esc(c.batch_name) : 'No batch'}</span>
       </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-purple btn-sm" onclick="openFacultyDiscussion(${c.id}, '${esc(c.code)}')">Q&A BOARD</button>
+      </div>
     </div>
   `).join('') : '<div class="empty-state"><span class="es-icon">⬡</span>No courses assigned to you yet.</div>';
 
@@ -273,8 +276,9 @@ function renderTimetable() {
         <td><strong>${esc(t.subject)}</strong></td>
         <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
         <td>${esc(t.course_code)}</td>
+        <td>${t.meeting_link ? `<a class="btn btn-purple btn-sm" href="${esc(t.meeting_link)}" target="_blank" rel="noopener">JOIN</a>` : ''}</td>
       </tr>
-    `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No timetable slots for your courses.</div></td></tr>';
+    `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>No timetable slots for your courses.</div></td></tr>';
   }
 }
 
@@ -308,6 +312,7 @@ function renderWeekGrid() {
         <div class="tt-cell">
           <div class="tt-subject">${esc(t.subject)}</div>
           <div class="tt-meta">${esc(t.course_code)} · ${esc(t.batch_name)}</div>
+          ${t.meeting_link ? `<a class="btn btn-purple btn-xs" href="${esc(t.meeting_link)}" target="_blank" rel="noopener">JOIN</a>` : ''}
         </div>
       `).join('') : '';
       tr.appendChild(td);
@@ -578,4 +583,82 @@ function showModal(title, bodyHtml) {
 function closeModal() {
   document.getElementById('modalOverlay').classList.add('hidden');
   document.getElementById('modalBody').innerHTML = '';
+}
+
+// ---------- Class discussion / Q&A board ----------
+let activeDiscussionCourse = null;
+
+function facultyDiscussionCard(p) {
+  const isStudent = p.author_role === 'student';
+  return `
+    <div class="disc-post">
+      <div class="disc-head">
+        <strong>${esc(p.author_name)}</strong> ${p.author_role === 'faculty' ? '<span class="badge badge-green">FACULTY</span>' : '<span class="badge badge-cyan">STUDENT</span>'}
+        <span class="muted">${esc((p.created_at || '').replace('T', ' ').slice(0, 16))}</span>
+      </div>
+      <div class="disc-body">${esc(p.body)}</div>
+      <div class="disc-foot">
+        <button class="btn ${p.voted ? 'btn-purple' : 'btn-ghost'} btn-xs" onclick="facultyVoteDiscussion(${p.id})">▲ ${p.upvotes}${p.voted ? ' · Upvoted' : ' Upvote'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="facultyReplyTo('${esc(p.author_name)}', ${p.id})">ANSWER</button>
+      </div>
+      ${(p.replies || []).length ? `<div class="disc-replies">${p.replies.map(r => `
+        <div class="disc-post disc-reply">
+          <div class="disc-head">
+            <strong>${esc(r.author_name)}</strong> ${r.author_role === 'faculty' ? '<span class="badge badge-green">FACULTY</span>' : ''}
+            <span class="muted">${esc((r.created_at || '').replace('T', ' ').slice(0, 16))}</span>
+          </div>
+          <div class="disc-body">${esc(r.body)}</div>
+          <div class="disc-foot">
+            <button class="btn ${r.voted ? 'btn-purple' : 'btn-ghost'} btn-xs" onclick="facultyVoteDiscussion(${r.id})">▲ ${r.upvotes}${r.voted ? ' · Upvoted' : ' Upvote'}</button>
+          </div>
+        </div>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+async function openFacultyDiscussion(courseId, code) {
+  activeDiscussionCourse = courseId;
+  showModal(code + ' — Q&A Board', `<div id="discussionWrap" style="min-height:120px"><div class="empty-state"><span class="es-icon">◌</span>Loading...</div></div>`);
+  await loadFacultyDiscussion();
+}
+
+async function loadFacultyDiscussion() {
+  try {
+    const d = await api('/api/faculty/courses/' + activeDiscussionCourse + '/discussion');
+    const wrap = document.getElementById('discussionWrap');
+    wrap.innerHTML = `
+      <form id="discussionForm" style="margin-bottom:16px">
+        <div style="display:flex;gap:8px">
+          <input type="text" id="discussionInput" class="input" placeholder="Answer a question, or post an announcement..." required>
+          <button type="submit" class="btn btn-purple">POST</button>
+        </div>
+      </form>
+      ${d.posts.length ? d.posts.map(p => facultyDiscussionCard(p)).join('') : '<div class="empty-state"><span class="es-icon">▦</span>No questions yet.</div>'}`;
+    document.getElementById('discussionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = document.getElementById('discussionInput').value.trim();
+      if (!body) return;
+      const parentId = window._replyTarget;
+      window._replyTarget = null;
+      try {
+        await api('/api/faculty/courses/' + activeDiscussionCourse + '/discussion', { method: 'POST', body: { body, parent_id: parentId } });
+        await loadFacultyDiscussion();
+      } catch (err) { toast(err.message, true); }
+    });
+    window._replyTarget = null;
+  } catch (err) { toast(err.message, true); }
+}
+
+function facultyReplyTo(author, parentId) {
+  const input = document.getElementById('discussionInput');
+  if (!input) return;
+  window._replyTarget = parentId;
+  input.value = '@' + author + ' ';
+  input.focus();
+}
+
+async function facultyVoteDiscussion(id) {
+  try {
+    await api('/api/faculty/discussion/' + id + '/vote', { method: 'POST' });
+    await loadFacultyDiscussion();
+  } catch (err) { toast(err.message, true); }
 }

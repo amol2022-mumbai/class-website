@@ -269,8 +269,12 @@ async function loadParentNotices() {
     document.getElementById('parentNotices').innerHTML = notices.length ? notices.map(n => `
       <div class="notice-item">
         <h3>${esc(n.title)}</h3>
-        <div class="ni-meta">Published ${esc(n.publish_date || '—')}</div>
+        <div class="ni-meta">Published ${esc(n.publish_date || '—')}
+          ${n.course_id ? `<span class="badge badge-purple" style="margin-left:6px">${esc(n.course_code)}</span>` : ''}
+          ${n.batch_id ? `<span class="badge badge-purple">${esc(n.batch_name)}</span>` : ''}
+        </div>
         <div class="ni-body">${esc(n.body || '')}</div>
+        ${n.meeting_link ? `<div style="margin-top:10px"><a class="btn btn-purple btn-sm" href="${esc(n.meeting_link)}" target="_blank" rel="noopener">JOIN ONLINE CLASS</a></div>` : ''}
       </div>`).join('') : '<div class="empty-state"><span class="es-icon">⚑</span>No notices right now.</div>';
   } catch (err) { toast(err.message, true); }
 }

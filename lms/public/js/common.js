@@ -113,6 +113,16 @@ function fileToBase64(file, cb) {
   reader.readAsDataURL(file);
 }
 
+// HTML for a passport-photo image (or fallback initial) used on ID cards.
+function photoHtml(photoData, name, cls) {
+  if (photoData) {
+    const mime = /^data:(image\/[a-z+]+);base64,/.test(photoData) ? photoData
+      : 'data:image/jpeg;base64,' + photoData;
+    return `<img src="${mime}" alt="" class="${cls || 'id-photo-img'}">`;
+  }
+  return esc((name || ' ')[0] || ' ');
+}
+
 // ---------- Mobile navigation (off-canvas drawer) ----------
 function toggleSidebar() {
   document.querySelector('.dash').classList.toggle('sidebar-open');

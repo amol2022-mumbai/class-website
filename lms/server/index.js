@@ -391,6 +391,7 @@ app.get('/api/admin/students', requireAdmin, (req, res) => {
   const students = db.prepare(`
     SELECT u.id, u.username, u.name, u.email, u.mobile, u.fee_amount, u.fee_paid, u.branch_id,
            u.discount_type, u.discount_value, u.fee_installments, u.fee_start_date,
+           (CASE WHEN u.photo_data IS NOT NULL THEN 1 ELSE 0 END) AS has_photo,
            b.name AS branch_name,
            (SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) AS course_count,
            (SELECT COUNT(*) FROM attendance a WHERE a.student_id = u.id AND a.status = 'present') AS present_days,
@@ -408,7 +409,7 @@ app.get('/api/admin/students', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/students', requireAdmin, (req, res) => {
-  const { username, password, name, email, mobile, fee_amount, fee_paid, discount_type, discount_value, fee_installments, fee_start_date } = req.body || {};
+  const { username, password, name, email, mobile, fee_amount, fee_paid, discount_type, discount_value, fee_installments, fee_start_date, photo_data, photo_name } = req.body || {};
   if (!username || !password || !name) return res.status(400).json({ error: 'Username, password and name are required' });
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
     return res.status(409).json({ error: 'Username already exists' });
@@ -416,20 +417,21 @@ app.post('/api/admin/students', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   const hash = bcrypt.hashSync(password, 10);
   const result = db.prepare(
-    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id, discount_type, discount_value, fee_installments, fee_start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (role, username, password_hash, name, email, mobile, fee_amount, fee_paid, branch_id, discount_type, discount_value, fee_installments, fee_start_date, photo_data, photo_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run('student', username, hash, name, email || null, mobile || null,
         fee_amount != null ? Number(fee_amount) : 0,
         fee_paid ? 1 : 0, bid,
         discount_type || 'none', Number(discount_value) || 0,
         Number(fee_installments) > 1 ? Number(fee_installments) : 1,
-        fee_start_date || null);
+        fee_start_date || null,
+        photo_data || null, photo_name || null);
   finance.ensureInstallments(result.lastInsertRowid);
   finance.refreshFeeStatus(result.lastInsertRowid);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
-  const { name, email, mobile, fee_amount, fee_paid, password, discount_type, discount_value, fee_installments, fee_start_date } = req.body || {};
+  const { name, email, mobile, fee_amount, fee_paid, password, discount_type, discount_value, fee_installments, fee_start_date, photo_data, photo_name, remove_photo } = req.body || {};
   const student = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
   const fields = {
@@ -442,14 +444,17 @@ app.put('/api/admin/students/:id', requireAdmin, (req, res) => {
     discount_value: discount_value != null ? Number(discount_value) : student.discount_value,
     fee_installments: fee_installments != null ? (Number(fee_installments) > 1 ? Number(fee_installments) : 1) : student.fee_installments,
     fee_start_date: fee_start_date !== undefined ? (fee_start_date || null) : student.fee_start_date,
+    photo_data: remove_photo ? null : (photo_data ?? student.photo_data),
+    photo_name: remove_photo ? null : (photo_name ?? student.photo_name),
   };
-  const update = 'UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ?, discount_type = ?, discount_value = ?, fee_installments = ?, fee_start_date = ?';
+  const update = 'UPDATE users SET name = ?, email = ?, mobile = ?, fee_amount = ?, fee_paid = ?, discount_type = ?, discount_value = ?, fee_installments = ?, fee_start_date = ?, photo_data = ?, photo_name = ?';
+  const params = [fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, fields.discount_type, fields.discount_value, fields.fee_installments, fields.fee_start_date, fields.photo_data, fields.photo_name];
   if (password) {
     db.prepare(update + ', password_hash = ? WHERE id = ?')
-      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, fields.discount_type, fields.discount_value, fields.fee_installments, fields.fee_start_date, bcrypt.hashSync(password, 10), student.id);
+      .run(...params, bcrypt.hashSync(password, 10), student.id);
   } else {
     db.prepare(update + ' WHERE id = ?')
-      .run(fields.name, fields.email, fields.mobile, fields.fee_amount, fields.fee_paid, fields.discount_type, fields.discount_value, fields.fee_installments, fields.fee_start_date, student.id);
+      .run(...params, student.id);
   }
   finance.ensureInstallments(student.id);
   finance.refreshFeeStatus(student.id);
@@ -1231,7 +1236,7 @@ function findTimetableConflicts({ batch_id, day, start_time, end_time, instructo
 }
 
 app.post('/api/admin/timetable', requireAdmin, (req, res) => {
-  const { batch_id, day, start_time, end_time, subject, instructor, room } = req.body || {};
+  const { batch_id, day, start_time, end_time, subject, instructor, room, meeting_link } = req.body || {};
   if (!batch_id || !day || !start_time || !end_time || !subject) {
     return res.status(400).json({ error: 'Batch, day, times and subject are required' });
   }
@@ -1244,15 +1249,15 @@ app.post('/api/admin/timetable', requireAdmin, (req, res) => {
     });
   }
   const result = db.prepare(
-    'INSERT INTO timetable (batch_id, day, start_time, end_time, subject, instructor, room) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(batch_id, day, start_time, end_time, subject, instructor || '', room || '');
+    'INSERT INTO timetable (batch_id, day, start_time, end_time, subject, instructor, room, meeting_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(batch_id, day, start_time, end_time, subject, instructor || '', room || '', meeting_link || null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/timetable/:id', requireAdmin, (req, res) => {
   const slot = db.prepare('SELECT * FROM timetable WHERE id = ?').get(req.params.id);
   if (!slot) return res.status(404).json({ error: 'Timetable slot not found' });
-  const { day, start_time, end_time, subject, instructor, room } = req.body || {};
+  const { day, start_time, end_time, subject, instructor, room, meeting_link } = req.body || {};
   const next = {
     day: day || slot.day,
     start_time: start_time || slot.start_time,
@@ -1260,6 +1265,7 @@ app.put('/api/admin/timetable/:id', requireAdmin, (req, res) => {
     instructor: instructor ?? slot.instructor,
     room: room ?? slot.room,
     subject: subject || slot.subject,
+    meeting_link: meeting_link !== undefined ? (meeting_link || null) : slot.meeting_link,
   };
   if (next.start_time >= next.end_time) return res.status(400).json({ error: 'Start time must be before end time' });
   const conflicts = findTimetableConflicts({ ...next, batch_id: slot.batch_id, excludeId: slot.id });
@@ -1269,8 +1275,8 @@ app.put('/api/admin/timetable/:id', requireAdmin, (req, res) => {
       conflicts,
     });
   }
-  db.prepare('UPDATE timetable SET day = ?, start_time = ?, end_time = ?, subject = ?, instructor = ?, room = ? WHERE id = ?')
-    .run(next.day, next.start_time, next.end_time, next.subject, next.instructor, next.room, slot.id);
+  db.prepare('UPDATE timetable SET day = ?, start_time = ?, end_time = ?, subject = ?, instructor = ?, room = ?, meeting_link = ? WHERE id = ?')
+    .run(next.day, next.start_time, next.end_time, next.subject, next.instructor, next.room, next.meeting_link, slot.id);
   res.json({ ok: true });
 });
 
@@ -1945,6 +1951,128 @@ app.delete('/api/faculty/lessons/:id', requireFaculty, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Class discussion / Q&A board ----------
+// Shared thread loader: top-level posts with replies, vote counts, and whether
+// the viewer already upvoted each post.
+function discussionThread(courseId, userId) {
+  return db.prepare(`
+    SELECT p.id, p.course_id, p.batch_id, p.author_id, p.parent_id, p.body, p.created_at,
+      u.name AS author_name, u.role AS author_role,
+      (SELECT COUNT(*) FROM discussion_votes v WHERE v.post_id = p.id) AS upvotes,
+      (SELECT COUNT(*) FROM discussion_votes v WHERE v.post_id = p.id AND v.user_id = ?) AS voted
+    FROM discussion_posts p JOIN users u ON u.id = p.author_id
+    WHERE p.course_id = ? AND p.parent_id IS NULL
+    ORDER BY p.created_at DESC, p.id DESC
+  `).all(userId, courseId);
+}
+
+function discussionReplies(courseId, userId) {
+  return db.prepare(`
+    SELECT p.id, p.course_id, p.author_id, p.parent_id, p.body, p.created_at,
+      u.name AS author_name, u.role AS author_role,
+      (SELECT COUNT(*) FROM discussion_votes v WHERE v.post_id = p.id) AS upvotes,
+      (SELECT COUNT(*) FROM discussion_votes v WHERE v.post_id = p.id AND v.user_id = ?) AS voted
+    FROM discussion_posts p JOIN users u ON u.id = p.author_id
+    WHERE p.course_id = ? AND p.parent_id IS NOT NULL
+    ORDER BY p.created_at ASC, p.id ASC
+  `).all(userId, courseId);
+}
+
+function discussionResponse(courseId, userId) {
+  const thread = discussionThread(courseId, userId);
+  const replies = discussionReplies(courseId, userId);
+  const byParent = {};
+  for (const r of replies) {
+    if (!byParent[r.parent_id]) byParent[r.parent_id] = [];
+    byParent[r.parent_id].push(r);
+  }
+  return { posts: thread.map(p => ({ ...p, replies: byParent[p.id] || [] })) };
+}
+
+// Student: enrollments gate access to a course's board.
+app.get('/api/student/courses/:id/discussion', requireStudent, (req, res) => {
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, req.params.id);
+  if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this course' });
+  res.json(discussionResponse(Number(req.params.id), req.session.user.id));
+});
+
+app.post('/api/student/courses/:id/discussion', requireStudent, (req, res) => {
+  const { body, parent_id } = req.body || {};
+  if (!body || !String(body).trim()) return res.status(400).json({ error: 'Question text is required' });
+  const courseId = Number(req.params.id);
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, courseId);
+  if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this course' });
+  if (parent_id) {
+    const parent = db.prepare('SELECT id, course_id FROM discussion_posts WHERE id = ?').get(parent_id);
+    if (!parent || parent.course_id !== courseId) return res.status(400).json({ error: 'Invalid reply target' });
+  }
+  const result = db.prepare(
+    'INSERT INTO discussion_posts (course_id, author_id, parent_id, body) VALUES (?, ?, ?, ?)'
+  ).run(courseId, req.session.user.id, parent_id ? Number(parent_id) : null, String(body).trim());
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.post('/api/student/discussion/:id/vote', requireStudent, (req, res) => {
+  const post = db.prepare('SELECT id, course_id FROM discussion_posts WHERE id = ?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  const enrolled = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?')
+    .get(req.session.user.id, post.course_id);
+  if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this course' });
+  const existing = db.prepare('SELECT 1 FROM discussion_votes WHERE post_id = ? AND user_id = ?')
+    .get(post.id, req.session.user.id);
+  if (existing) {
+    db.prepare('DELETE FROM discussion_votes WHERE post_id = ? AND user_id = ?').run(post.id, req.session.user.id);
+    res.json({ upvoted: false });
+  } else {
+    db.prepare('INSERT INTO discussion_votes (post_id, user_id) VALUES (?, ?)').run(post.id, req.session.user.id);
+    res.json({ upvoted: true });
+  }
+});
+
+// Faculty: teaching the course gates access.
+app.get('/api/faculty/courses/:id/discussion', requireFaculty, (req, res) => {
+  const owned = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, req.params.id);
+  if (!owned) return res.status(403).json({ error: 'You do not teach this course' });
+  res.json(discussionResponse(Number(req.params.id), req.session.user.id));
+});
+
+app.post('/api/faculty/courses/:id/discussion', requireFaculty, (req, res) => {
+  const { body, parent_id } = req.body || {};
+  if (!body || !String(body).trim()) return res.status(400).json({ error: 'Reply text is required' });
+  const courseId = Number(req.params.id);
+  const owned = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, courseId);
+  if (!owned) return res.status(403).json({ error: 'You do not teach this course' });
+  if (parent_id) {
+    const parent = db.prepare('SELECT id, course_id FROM discussion_posts WHERE id = ?').get(parent_id);
+    if (!parent || parent.course_id !== courseId) return res.status(400).json({ error: 'Invalid reply target' });
+  }
+  const result = db.prepare(
+    'INSERT INTO discussion_posts (course_id, author_id, parent_id, body) VALUES (?, ?, ?, ?)'
+  ).run(courseId, req.session.user.id, parent_id ? Number(parent_id) : null, String(body).trim());
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.post('/api/faculty/discussion/:id/vote', requireFaculty, (req, res) => {
+  const post = db.prepare('SELECT id, course_id FROM discussion_posts WHERE id = ?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  const owned = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, post.course_id);
+  if (!owned) return res.status(403).json({ error: 'You do not teach this course' });
+  const existing = db.prepare('SELECT 1 FROM discussion_votes WHERE post_id = ? AND user_id = ?')
+    .get(post.id, req.session.user.id);
+  if (existing) {
+    db.prepare('DELETE FROM discussion_votes WHERE post_id = ? AND user_id = ?').run(post.id, req.session.user.id);
+    res.json({ upvoted: false });
+  } else {
+    db.prepare('INSERT INTO discussion_votes (post_id, user_id) VALUES (?, ?)').run(post.id, req.session.user.id);
+    res.json({ upvoted: true });
+  }
+});
+
 app.get('/api/faculty/timetable', requireFaculty, (req, res) => {
   res.json(db.prepare(`
     SELECT t.*, b.name AS batch_name, c.code AS course_code
@@ -2312,9 +2440,15 @@ app.get('/api/admin/notices', requireAdmin, (req, res) => {
   const bid = activeBranch(req);
   res.json(db.prepare(`
     SELECT n.id, n.title, n.body, n.publish_date, n.expires_on, n.created_at, n.attachment_name,
+      n.meeting_link, n.course_id, n.batch_id,
       (CASE WHEN n.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment,
-      b.name AS branch_name FROM notices n
+      b.name AS branch_name,
+      c.code AS course_code, c.title AS course_title,
+      ba.name AS batch_name
+    FROM notices n
     LEFT JOIN branches b ON b.id = n.branch_id
+    LEFT JOIN courses c ON c.id = n.course_id
+    LEFT JOIN batches ba ON ba.id = n.batch_id
     WHERE ${branchWhere('n', bid)}
     ORDER BY n.publish_date DESC
   `).all(...(bid ? [bid] : [])));
@@ -2329,24 +2463,28 @@ app.get('/api/admin/notices/:id/attachment', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/notices', requireAdmin, (req, res) => {
-  const { title, body, publish_date, expires_on, attachment_name, attachment_data } = req.body || {};
+  const { title, body, publish_date, expires_on, attachment_name, attachment_data, meeting_link, course_id, batch_id } = req.body || {};
   if (!title) return res.status(400).json({ error: 'Title is required' });
   if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
+  if (batch_id && !course_id) return res.status(400).json({ error: 'Batch targeting requires a course' });
   const result = db.prepare(
-    'INSERT INTO notices (branch_id, title, body, publish_date, expires_on, attachment_name, attachment_data) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO notices (branch_id, title, body, publish_date, expires_on, attachment_name, attachment_data, meeting_link, course_id, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(activeBranch(req), title, body || null, publish_date || null, expires_on || null,
-        attachment_name || null, attachment_data || null);
+        attachment_name || null, attachment_data || null,
+        meeting_link || null, course_id ? Number(course_id) : null, batch_id ? Number(batch_id) : null);
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/admin/notices/:id', requireAdmin, (req, res) => {
   const notice = db.prepare('SELECT * FROM notices WHERE id = ?').get(req.params.id);
   if (!notice) return res.status(404).json({ error: 'Notice not found' });
-  const { title, body, publish_date, expires_on, attachment_name, attachment_data, remove_attachment } = req.body || {};
+  const { title, body, publish_date, expires_on, attachment_name, attachment_data, remove_attachment, meeting_link, course_id, batch_id } = req.body || {};
   if (attachment_name && !attachment_data) return res.status(400).json({ error: 'Attachment file data is missing' });
+  if (batch_id && !course_id) return res.status(400).json({ error: 'Batch targeting requires a course' });
   db.prepare(`
     UPDATE notices SET title = ?, body = ?, publish_date = ?, expires_on = ?,
-      attachment_name = ?, attachment_data = ? WHERE id = ?
+      attachment_name = ?, attachment_data = ?, meeting_link = ?, course_id = ?, batch_id = ?
+      WHERE id = ?
   `).run(
     title ?? notice.title,
     body !== undefined ? body : notice.body,
@@ -2354,6 +2492,9 @@ app.put('/api/admin/notices/:id', requireAdmin, (req, res) => {
     expires_on !== undefined ? (expires_on || null) : notice.expires_on,
     remove_attachment ? null : (attachment_name ?? notice.attachment_name),
     remove_attachment ? null : (attachment_data ?? notice.attachment_data),
+    meeting_link !== undefined ? (meeting_link || null) : notice.meeting_link,
+    course_id !== undefined ? (course_id ? Number(course_id) : null) : notice.course_id,
+    batch_id !== undefined ? (batch_id ? Number(batch_id) : null) : notice.batch_id,
     notice.id
   );
   res.json({ ok: true });
@@ -2705,7 +2846,7 @@ function buildIdCard(studentId) {
   const valid = new Date();
   valid.setFullYear(valid.getFullYear() + 1);
   return {
-    student: { username: student.username, name: student.name, mobile: student.mobile, branch_name: student.branch_name, branch_address: student.branch_address },
+    student: { username: student.username, name: student.name, mobile: student.mobile, branch_name: student.branch_name, branch_address: student.branch_address, photo_data: student.photo_data || null },
     courses,
     valid_until: valid.toISOString().slice(0, 10),
     issued_on: new Date().toISOString().slice(0, 10),
@@ -2759,10 +2900,20 @@ app.get('/api/student/notices', requireStudent, (req, res) => {
   const s = db.prepare('SELECT branch_id FROM users WHERE id = ?').get(req.session.user.id);
   const rows = db.prepare(`
     SELECT n.id, n.title, n.body, n.publish_date, n.expires_on, n.attachment_name,
+      n.meeting_link, n.course_id, n.batch_id,
+      c.code AS course_code, ba.name AS batch_name,
       (CASE WHEN n.attachment_data IS NOT NULL THEN 1 ELSE 0 END) AS has_attachment
-    FROM notices n WHERE (n.branch_id IS NULL OR n.branch_id = ?) AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
+    FROM notices n
+    LEFT JOIN courses c ON c.id = n.course_id
+    LEFT JOIN batches ba ON ba.id = n.batch_id
+    WHERE (n.branch_id IS NULL OR n.branch_id = ?)
+      AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
+      AND (n.course_id IS NULL OR EXISTS (
+        SELECT 1 FROM enrollments e WHERE e.student_id = ? AND e.course_id = n.course_id))
+      AND (n.batch_id IS NULL OR EXISTS (
+        SELECT 1 FROM enrollments e2 WHERE e2.student_id = ? AND e2.batch_id = n.batch_id))
     ORDER BY n.publish_date DESC
-  `).all(s ? s.branch_id : null);
+  `).all(s ? s.branch_id : null, req.session.user.id, req.session.user.id);
   res.json(rows);
 });
 
@@ -2777,12 +2928,19 @@ app.get('/api/student/notices/:id/attachment', requireStudent, (req, res) => {
 
 app.get('/api/parent/notices', requireParent, (req, res) => {
   const rows = db.prepare(`
-    SELECT DISTINCT n.id, n.title, n.body, n.publish_date, n.expires_on
+    SELECT DISTINCT n.id, n.title, n.body, n.publish_date, n.expires_on, n.meeting_link,
+      n.course_id, n.batch_id, c.code AS course_code, ba.name AS batch_name
     FROM notices n
     JOIN parent_students ps ON 1=1
     JOIN users s ON s.id = ps.student_id
+    LEFT JOIN courses c ON c.id = n.course_id
+    LEFT JOIN batches ba ON ba.id = n.batch_id
     WHERE ps.parent_id = ? AND (n.branch_id IS NULL OR n.branch_id = s.branch_id)
       AND (n.expires_on IS NULL OR n.expires_on >= date('now'))
+      AND (n.course_id IS NULL OR EXISTS (
+        SELECT 1 FROM enrollments e WHERE e.student_id = s.id AND e.course_id = n.course_id))
+      AND (n.batch_id IS NULL OR EXISTS (
+        SELECT 1 FROM enrollments e2 WHERE e2.student_id = s.id AND e2.batch_id = n.batch_id))
     ORDER BY n.publish_date DESC
   `).all(req.session.user.id);
   res.json(rows);

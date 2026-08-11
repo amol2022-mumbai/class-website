@@ -554,6 +554,30 @@ function migrate() {
   addCol('assignments', 'attachment_name TEXT');
   addCol('assignments', 'attachment_data TEXT');
   addCol('exam_results', 'answers TEXT');
+  addCol('users', 'photo_data TEXT');
+  addCol('users', 'photo_name TEXT');
+  addCol('notices', 'course_id INTEGER');
+  addCol('notices', 'batch_id INTEGER');
+  addCol('notices', 'meeting_link TEXT');
+  addCol('timetable', 'meeting_link TEXT');
+
+  // Class discussion / Q&A board with per-user upvotes.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS discussion_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+      author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES discussion_posts(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS discussion_votes (
+      post_id INTEGER NOT NULL REFERENCES discussion_posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (post_id, user_id)
+    );
+  `);
 }
 
 // Backfills branch_id on rows created before branches existed, and guarantees a
