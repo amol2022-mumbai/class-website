@@ -6,8 +6,10 @@ const tabTitles = {
   dashboard: ['// FACULTY / OVERVIEW', 'My Dashboard'],
   courses: ['// FACULTY / COURSES', 'My Courses'],
   syllabus: ['// FACULTY / SYLLABUS', 'Syllabus Progress'],
+  lessons: ['// FACULTY / LESSON LOG', 'Lecture Records'],
   timetable: ['// FACULTY / TIMETABLE', 'Weekly Timetable'],
   students: ['// FACULTY / STUDENTS', 'Student Roster'],
+  markbook: ['// FACULTY / MARKBOOK', 'Course Gradebook'],
   attendance: ['// FACULTY / ATTENDANCE', 'Attendance Tracker'],
   assignments: ['// FACULTY / GRADING', 'Assignment Grading'],
   leaves: ['// FACULTY / LEAVE', 'Leave Management'],
@@ -27,9 +29,14 @@ const tabTitles = {
   document.getElementById('rosterCourse').addEventListener('change', () => loadRoster());
   document.getElementById('attCourse').addEventListener('change', () => loadAttendance());
   document.getElementById('attDate').addEventListener('change', () => loadAttendance());
+  document.getElementById('lessonCourse').addEventListener('change', () => fillLessonSyllabus());
   document.getElementById('leaveForm').addEventListener('submit', (ev) => {
     ev.preventDefault();
     applyLeave(new FormData(ev.target));
+  });
+  document.getElementById('lessonForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    logLesson(new FormData(ev.target));
   });
 
   switchTab('dashboard');
@@ -47,8 +54,10 @@ function switchTab(tab) {
   if (tab === 'dashboard') loadDashboard();
   else if (tab === 'courses') loadCourses();
   else if (tab === 'syllabus') loadFacultySyllabus();
+  else if (tab === 'lessons') loadLessons();
   else if (tab === 'timetable') loadTimetable();
   else if (tab === 'students') loadRoster();
+  else if (tab === 'markbook') loadMarkbook();
   else if (tab === 'attendance') loadAttendance();
   else if (tab === 'assignments') loadAssignments();
   else if (tab === 'leaves') loadLeaves();
@@ -74,11 +83,27 @@ async function loadCourses() {
 
   const rosterSel = document.getElementById('rosterCourse');
   const attSel = document.getElementById('attCourse');
+  const markbookSel = document.getElementById('markbookCourse');
+  const lessonSel = document.getElementById('lessonCourse');
   const opts = facultyCourses.map(c =>
     `<option value="${c.id}">${esc(c.code)} — ${esc(c.title)}</option>`
   ).join('');
   rosterSel.innerHTML = '<option value="">Select course...</option>' + opts;
   attSel.innerHTML = '<option value="">Select course...</option>' + opts;
+  if (markbookSel) markbookSel.innerHTML = '<option value="">Select course...</option>' + opts;
+  if (lessonSel) lessonSel.innerHTML = '<option value="">Select course...</option>' + opts;
+}
+
+// Populate the syllabus-topic dropdown for the selected course in the lesson form.
+async function fillLessonSyllabus() {
+  const courseId = document.getElementById('lessonCourse').value;
+  const sySel = document.getElementById('lessonSyllabus');
+  if (!courseId) { sySel.innerHTML = '<option value="">No syllabus selected</option>'; return; }
+  const rows = await api('/api/faculty/syllabus');
+  const items = rows.filter(s => s.course_id === Number(courseId));
+  sySel.innerHTML = '<option value="">— no syllabus link —</option>' + items.map(s =>
+    `<option value="${s.id}">Week ${s.week_no}: ${esc(s.topic)} (${esc(s.status)})</option>`
+  ).join('') + (items.length ? '' : '<option value="">No syllabus published for this course</option>');
 }
 
 // ---------- Syllabus ----------
@@ -132,6 +157,52 @@ function updateSyllabusStatus(id) {
   });
 }
 
+// ---------- Lesson Log ----------
+async function loadLessons() {
+  try {
+    if (facultyCourses.length === 0) await loadCourses();
+    document.getElementById('lessonDate').value = todayStr();
+    fillLessonSyllabus();
+    const lessons = await api('/api/faculty/lessons');
+    document.getElementById('lessonRows').innerHTML = lessons.length ? lessons.map(l => `
+      <tr>
+        <td class="muted">${esc(l.lesson_date || '—')}</td>
+        <td><span class="badge badge-cyan">${esc(l.course_code)}</span></td>
+        <td class="muted">${esc(l.batch_name || '—')}</td>
+        <td><strong>${esc(l.topic)}</strong></td>
+        <td>${l.syllabus_topic ? `<span class="badge badge-green">${esc(l.syllabus_topic)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(l.notes || '—')}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="deleteLesson(${l.id})">DELETE</button></td>
+      </tr>
+    `).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▤</span>No lectures logged yet.</div></td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+async function logLesson(f) {
+  const body = {
+    course_id: Number(f.get('course_id')),
+    syllabus_id: f.get('syllabus_id') ? Number(f.get('syllabus_id')) : null,
+    lesson_date: f.get('lesson_date'),
+    topic: f.get('topic'),
+    notes: f.get('notes'),
+  };
+  try {
+    await api('/api/faculty/lessons', { method: 'POST', body });
+    toast('Lecture logged');
+    document.getElementById('lessonForm').reset();
+    document.getElementById('lessonDate').value = todayStr();
+    loadLessons();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteLesson(id) {
+  try {
+    await api('/api/faculty/lessons/' + id, { method: 'DELETE' });
+    toast('Lesson deleted');
+    loadLessons();
+  } catch (err) { toast(err.message, true); }
+}
+
 async function loadDashboard() {
   const courses = await api('/api/faculty/courses');
   const timetable = await api('/api/faculty/timetable');
@@ -165,17 +236,84 @@ async function loadDashboard() {
   `).join('') : '<div class="empty-state"><span class="es-icon">⬡</span>No courses assigned yet.</div>';
 }
 
+let timetableCache = [];
+let timetableView = 'table';
+
 async function loadTimetable() {
-  const timetable = await api('/api/faculty/timetable');
-  document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
-    <tr>
-      <td class="muted">${esc(t.day)}</td>
-      <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
-      <td><strong>${esc(t.subject)}</strong></td>
-      <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
-      <td>${esc(t.course_code)}</td>
-    </tr>
-  `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No timetable slots for your courses.</div></td></tr>';
+  try {
+    timetableCache = await api('/api/faculty/timetable');
+    renderTimetable();
+  } catch (err) { toast(err.message, true); }
+}
+
+function setTimetableView(view) {
+  timetableView = view;
+  document.getElementById('timetableTableView').classList.toggle('btn-purple', view === 'table');
+  document.getElementById('timetableTableView').classList.toggle('btn-ghost', view !== 'table');
+  document.getElementById('timetableWeekView').classList.toggle('btn-purple', view === 'week');
+  document.getElementById('timetableWeekView').classList.toggle('btn-ghost', view !== 'week');
+  renderTimetable();
+}
+
+function renderTimetable() {
+  const tableWrap = document.getElementById('timetableRowsWrap');
+  const weekWrap = document.getElementById('timetableWeekWrap');
+  if (timetableView === 'week') {
+    tableWrap.classList.add('hidden');
+    weekWrap.classList.remove('hidden');
+    renderWeekGrid();
+  } else {
+    weekWrap.classList.add('hidden');
+    tableWrap.classList.remove('hidden');
+    const timetable = timetableCache;
+    document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
+      <tr>
+        <td class="muted">${esc(t.day)}</td>
+        <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
+        <td><strong>${esc(t.subject)}</strong></td>
+        <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
+        <td>${esc(t.course_code)}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5"><div class="empty-state"><span class="es-icon">⧉</span>No timetable slots for your courses.</div></td></tr>';
+  }
+}
+
+function renderWeekGrid() {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const wrap = document.getElementById('timetableWeekWrap');
+  const byDay = {};
+  days.forEach(d => byDay[d] = timetableCache.filter(t => t.day === d));
+  const hasAny = timetableCache.length > 0;
+  wrap.innerHTML = `
+    <table class="timetable-grid">
+      <thead><tr>
+        <th class="tt-time-col">Time</th>
+        ${days.map(d => `<th>${d.slice(0, 3).toUpperCase()}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${!hasAny ? `<tr><td colspan="8"><div class="empty-state"><span class="es-icon">⧉</span>No timetable slots for your courses.</div></td></tr>` : ''}
+      </tbody>
+    </table>`;
+  const body = wrap.querySelector('tbody');
+  if (!hasAny) return;
+  // Time slots from all days, sorted.
+  const slots = [...new Map(timetableCache.map(t => [t.start_time, t.end_time])).entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [start, end] of slots) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="tt-time-col muted"><strong>${esc(start)}</strong>${start !== end ? `<br><span class="muted">${esc(end)}</span>` : ''}</td>`;
+    for (const d of days) {
+      const td = document.createElement('td');
+      const cell = byDay[d].filter(t => t.start_time === start);
+      td.innerHTML = cell.length ? cell.map(t => `
+        <div class="tt-cell">
+          <div class="tt-subject">${esc(t.subject)}</div>
+          <div class="tt-meta">${esc(t.course_code)} · ${esc(t.batch_name)}</div>
+        </div>
+      `).join('') : '';
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
 }
 
 async function loadRoster() {
@@ -194,6 +332,68 @@ async function loadRoster() {
       <td><span class="badge badge-green">${s.attendance_count} records</span></td>
     </tr>
   `).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">▣</span>No students enrolled in this course.</div></td></tr>';
+}
+
+async function loadMarkbook() {
+  const courseId = document.getElementById('markbookCourse').value;
+  const wrap = document.getElementById('markbookWrap');
+  const summary = document.getElementById('markbookSummary');
+  if (!courseId) {
+    wrap.innerHTML = '<div class="empty-state"><span class="es-icon">▤</span>Select a course to view its markbook.</div>';
+    summary.innerHTML = '';
+    return;
+  }
+  try {
+    const d = await api(`/api/faculty/courses/${courseId}/markbook`);
+    if (!d.students.length) {
+      wrap.innerHTML = '<div class="empty-state"><span class="es-icon">▤</span>No students enrolled in this course.</div>';
+      summary.innerHTML = '';
+      return;
+    }
+    summary.innerHTML = `
+      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:4px">
+        <div class="stat-card"><div class="stat-num">${d.assignments.length}</div><div class="stat-label">Assignments</div></div>
+        <div class="stat-card"><div class="stat-num">${d.exams.length}</div><div class="stat-label">Exams</div></div>
+        <div class="stat-card"><div class="stat-num">${d.students.length}</div><div class="stat-label">Students</div></div>
+        <div class="stat-card"><div class="stat-num">${classAverage(d.students)}</div><div class="stat-label">Class Avg</div></div>
+      </div>`;
+    wrap.innerHTML = `
+      <table class="markbook-table">
+        <thead><tr>
+          <th>Student</th>
+          ${d.assignments.map(a => `<th title="${esc(a.title)}">${esc(a.title)}<div class="muted">${a.max_score}</div></th>`).join('')}
+          ${d.exams.map(e => `<th title="${esc(e.title)}">${esc(e.title)}<div class="muted">${e.max_marks}</div></th>`).join('')}
+          <th>Assign %</th><th>Exam %</th><th>Attend %</th><th>GPA</th><th>Grade</th>
+        </tr></thead>
+        <tbody>
+          ${d.students.map(s => `
+            <tr>
+              <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.username)}</div></td>
+              ${d.assignments.map(a => `<td>${s.assignment_scores[a.id] != null ? s.assignment_scores[a.id] : '<span class="muted">—</span>'}</td>`).join('')}
+              ${d.exams.map(e => `<td>${s.exam_scores[e.id] != null ? s.exam_scores[e.id] : '<span class="muted">—</span>'}</td>`).join('')}
+              <td>${s.assignment_pct != null ? s.assignment_pct + '%' : '—'}</td>
+              <td>${s.exam_pct != null ? s.exam_pct + '%' : '—'}</td>
+              <td>${s.attendance_pct != null ? s.attendance_pct + '%' : '—'}</td>
+              <td><strong>${s.gpa}</strong></td>
+              <td><span class="badge ${gradeBadge(s.grade)}">${esc(s.grade)}</span></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch (err) { toast(err.message, true); }
+}
+
+function classAverage(students) {
+  const vals = students.map(s => s.overall_pct).filter(v => v != null);
+  if (!vals.length) return '—';
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) + '%';
+}
+
+function gradeBadge(g) {
+  if (g === 'A' || g === 'B') return 'badge-green';
+  if (g === 'C') return 'badge-yellow';
+  if (g === 'D' || g === 'E') return 'badge-yellow';
+  if (g === 'F') return 'badge-red';
+  return 'badge-cyan';
 }
 
 async function loadAttendance() {

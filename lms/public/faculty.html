@@ -26,8 +26,10 @@
         <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">◉</span> Dashboard</button>
         <button class="nav-item" data-tab="courses"><span class="nav-icon">⬡</span> My Courses</button>
         <button class="nav-item" data-tab="syllabus"><span class="nav-icon">▦</span> Syllabus</button>
+        <button class="nav-item" data-tab="lessons"><span class="nav-icon">▤</span> Lesson Log</button>
         <button class="nav-item" data-tab="timetable"><span class="nav-icon">⧉</span> Timetable</button>
         <button class="nav-item" data-tab="students"><span class="nav-icon">▣</span> Students</button>
+        <button class="nav-item" data-tab="markbook"><span class="nav-icon">▤</span> Markbook</button>
         <button class="nav-item" data-tab="attendance"><span class="nav-icon">✓</span> Attendance</button>
         <button class="nav-item" data-tab="assignments"><span class="nav-icon">✎</span> Grading</button>
         <button class="nav-item" data-tab="leaves"><span class="nav-icon">☍</span> Leave</button>
@@ -88,13 +90,66 @@
       <!-- Timetable -->
       <section id="tab-timetable" class="tab-panel hidden">
         <div class="panel">
-          <div class="panel-header"><h2>Weekly Timetable</h2></div>
+          <div class="panel-header">
+            <h2>Weekly Timetable</h2>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-small" id="timetableTableView" onclick="setTimetableView('table')">TABLE</button>
+              <button class="btn btn-purple btn-small" id="timetableWeekView" onclick="setTimetableView('week')">WEEK GRID</button>
+            </div>
+          </div>
+          <div id="timetableRowsWrap">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Day</th><th>Time</th><th>Subject</th><th>Batch</th><th>Course</th></tr>
+                </thead>
+                <tbody id="timetableRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="timetableWeekWrap" class="hidden" style="overflow-x:auto"></div>
+        </div>
+      </section>
+
+      <!-- Lesson Log -->
+      <section id="tab-lessons" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header"><h2>Log a Lecture</h2></div>
+          <form id="lessonForm" class="notify-form" style="padding:16px 0">
+            <div class="form-grid">
+              <div class="field">
+                <label>Course</label>
+                <select name="course_id" id="lessonCourse" required></select>
+              </div>
+              <div class="field">
+                <label>Syllabus Topic (optional)</label>
+                <select name="syllabus_id" id="lessonSyllabus"></select>
+              </div>
+              <div class="field">
+                <label>Date</label>
+                <input type="date" name="lesson_date" id="lessonDate" required>
+              </div>
+              <div class="field">
+                <label>Topic Taught</label>
+                <input type="text" name="topic" placeholder="e.g. Python Basics" required>
+              </div>
+              <div class="field">
+                <label>Notes</label>
+                <textarea name="notes" rows="2" placeholder="What was covered, homework given, etc."></textarea>
+              </div>
+            </div>
+            <div class="alert alert-info" style="margin-top:10px">Logging a lecture linked to a syllabus topic auto-marks that topic as <strong>Completed</strong>.</div>
+            <div class="modal-actions" style="margin-top:12px">
+              <button type="submit" class="btn btn-purple">LOG LESSON</button>
+            </div>
+          </form>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Lecture History</h2></div>
           <div class="table-wrap">
             <table>
-              <thead>
-                <tr><th>Day</th><th>Time</th><th>Subject</th><th>Batch</th><th>Course</th></tr>
-              </thead>
-              <tbody id="timetableRows"></tbody>
+              <thead><tr><th>Date</th><th>Course</th><th>Batch</th><th>Topic Taught</th><th>Syllabus Link</th><th>Notes</th><th></th></tr></thead>
+              <tbody id="lessonRows"></tbody>
             </table>
           </div>
         </div>
@@ -119,6 +174,23 @@
               <tbody id="rosterRows"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- Markbook -->
+      <section id="tab-markbook" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Course Markbook</h2>
+            <div class="field" style="margin:0">
+              <select id="markbookCourse" onchange="loadMarkbook()">
+                <option value="">Select course...</option>
+              </select>
+            </div>
+          </div>
+          <div id="markbookSummary" style="margin-bottom:14px"></div>
+          <div id="markbookWrap" class="table-wrap"></div>
+          <div class="muted" style="margin-top:10px">GPA = 40% assignments + 40% exams + 20% attendance (weighted only on components that have marks).</div>
         </div>
       </section>
 

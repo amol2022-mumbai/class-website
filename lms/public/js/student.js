@@ -140,21 +140,110 @@ async function loadStudentSyllabus() {
         <td><strong>${esc(s.topic)}</strong>${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}</td>
         <td class="muted">${esc(s.objectives || '—')}</td>
       </tr>`).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">▦</span>No syllabus published for your courses yet.</div></td></tr>';
+
+    const lessons = await api('/api/student/lessons');
+    const hist = document.getElementById('studentLessonHistory');
+    hist.innerHTML = lessons.length ? lessons.map(g => `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">
+          <h2><span class="badge badge-cyan">${esc(g.course_code)}</span> ${esc(g.course_title)}</h2>
+          <span class="badge badge-purple">${g.lessons.length} lecture${g.lessons.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Topic Taught</th><th>Faculty</th><th>Syllabus Link</th><th>Notes</th></tr></thead>
+            <tbody>${g.lessons.map(l => `
+              <tr>
+                <td class="muted">${esc(l.lesson_date || '—')}</td>
+                <td><strong>${esc(l.topic)}</strong></td>
+                <td class="muted">${esc(l.faculty_name || '—')}</td>
+                <td>${l.syllabus_topic ? `<span class="badge badge-green">${esc(l.syllabus_topic)}</span>` : '<span class="muted">—</span>'}</td>
+                <td class="muted">${esc(l.notes || '—')}</td>
+              </tr>`).join('')}</tbody>
+          </table>
+        </div>
+      </div>`).join('') : '<div class="empty-state"><span class="es-icon">▤</span>No lectures logged for your courses yet.</div>';
   } catch (err) { toast(err.message, true); }
 }
 
+let stuTimetableCache = [];
+let stuTimetableView = 'table';
+
 async function loadTimetable() {
-  const timetable = await api('/api/student/timetable');
-  document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
-    <tr>
-      <td class="muted">${esc(t.day)}</td>
-      <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
-      <td><strong>${esc(t.subject)}</strong></td>
-      <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
-      <td>${esc(t.course_code)}</td>
-      <td class="muted">${esc(t.instructor || '—')}</td>
-    </tr>
-  `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>';
+  try {
+    stuTimetableCache = await api('/api/student/timetable');
+    renderStuTimetable();
+  } catch (err) { toast(err.message, true); }
+}
+
+function setStuTimetableView(view) {
+  stuTimetableView = view;
+  document.getElementById('stuTimetableTableView').classList.toggle('btn-purple', view === 'table');
+  document.getElementById('stuTimetableTableView').classList.toggle('btn-ghost', view !== 'table');
+  document.getElementById('stuTimetableWeekView').classList.toggle('btn-purple', view === 'week');
+  document.getElementById('stuTimetableWeekView').classList.toggle('btn-ghost', view !== 'week');
+  renderStuTimetable();
+}
+
+function renderStuTimetable() {
+  const tableWrap = document.getElementById('stuTimetableRowsWrap');
+  const weekWrap = document.getElementById('stuTimetableWeekWrap');
+  if (stuTimetableView === 'week') {
+    tableWrap.classList.add('hidden');
+    weekWrap.classList.remove('hidden');
+    renderStuWeekGrid();
+  } else {
+    weekWrap.classList.add('hidden');
+    tableWrap.classList.remove('hidden');
+    const timetable = stuTimetableCache;
+    document.getElementById('timetableRows').innerHTML = timetable.length ? timetable.map(t => `
+      <tr>
+        <td class="muted">${esc(t.day)}</td>
+        <td class="muted">${esc(t.start_time)} — ${esc(t.end_time)}</td>
+        <td><strong>${esc(t.subject)}</strong></td>
+        <td><span class="badge badge-cyan">${esc(t.batch_name)}</span></td>
+        <td>${esc(t.course_code)}</td>
+        <td class="muted">${esc(t.instructor || '—')}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="6"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>';
+  }
+}
+
+function renderStuWeekGrid() {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const wrap = document.getElementById('stuTimetableWeekWrap');
+  const byDay = {};
+  days.forEach(d => byDay[d] = stuTimetableCache.filter(t => t.day === d));
+  const hasAny = stuTimetableCache.length > 0;
+  wrap.innerHTML = `
+    <table class="timetable-grid">
+      <thead><tr>
+        <th class="tt-time-col">Time</th>
+        ${days.map(d => `<th>${d.slice(0, 3).toUpperCase()}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${!hasAny ? `<tr><td colspan="8"><div class="empty-state"><span class="es-icon">⧉</span>You have not been assigned to any batches yet.</div></td></tr>` : ''}
+      </tbody>
+    </table>`;
+  const body = wrap.querySelector('tbody');
+  if (!hasAny) return;
+  const slots = [...new Map(stuTimetableCache.map(t => [t.start_time, t.end_time])).entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [start, end] of slots) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="tt-time-col muted"><strong>${esc(start)}</strong>${start !== end ? `<br><span class="muted">${esc(end)}</span>` : ''}</td>`;
+    for (const d of days) {
+      const td = document.createElement('td');
+      const cell = byDay[d].filter(t => t.start_time === start);
+      td.innerHTML = cell.length ? cell.map(t => `
+        <div class="tt-cell">
+          <div class="tt-subject">${esc(t.subject)}</div>
+          <div class="tt-meta">${esc(t.course_code)} · ${esc(t.instructor || t.batch_name)}</div>
+        </div>
+      `).join('') : '';
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
 }
 
 async function loadExams() {
@@ -668,6 +757,21 @@ async function loadAttendance() {
 async function loadGrades() {
   const grades = await api('/api/student/grades');
 
+  document.getElementById('courseSummaryRows').innerHTML = grades.courseSummary.length ? grades.courseSummary.map(g => {
+    const pct = g.overall_pct;
+    const badge = pct != null ? `badge-${pct >= 70 ? 'green' : pct >= 50 ? 'yellow' : 'red'}` : 'badge-cyan';
+    return `
+    <tr>
+      <td><strong>${esc(g.course_code)}</strong> — <span class="muted">${esc(g.course_title)}</span></td>
+      <td>${g.assignment_pct != null ? g.assignment_pct + '%' : '—'}</td>
+      <td>${g.exam_pct != null ? g.exam_pct + '%' : '—'}</td>
+      <td>${grades.attendancePct != null ? grades.attendancePct + '%' : '—'}</td>
+      <td><span class="badge ${badge}">${pct != null ? pct + '%' : '—'}</span></td>
+      <td><strong>${g.gpa}</strong></td>
+      <td><span class="badge ${g.grade === 'F' ? 'badge-red' : g.grade === 'A' || g.grade === 'B' ? 'badge-green' : 'badge-yellow'}">${esc(g.grade)}</span></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="7"><div class="empty-state"><span class="es-icon">▤</span>No graded coursework yet.</div></td></tr>';
+
   document.getElementById('gradeRows').innerHTML = grades.assignmentGrades.length ? grades.assignmentGrades.map(g => {
     const pct = Math.round((g.score / g.max_score) * 100);
     return `
@@ -678,6 +782,17 @@ async function loadGrades() {
       <td>${g.max_score} <span class="badge badge-${pct >= 70 ? 'green' : pct >= 50 ? 'yellow' : 'red'}" style="margin-left:6px">${pct}%</span></td>
     </tr>`;
   }).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">▤</span>No graded assignments yet.</div></td></tr>';
+
+  document.getElementById('examGradeRows').innerHTML = grades.examGrades.length ? grades.examGrades.map(g => {
+    const pct = Math.round((g.marks / g.max_marks) * 100);
+    return `
+    <tr>
+      <td><strong>${esc(g.title)}</strong></td>
+      <td>${esc(g.course_code)} — <span class="muted">${esc(g.course_title)}</span></td>
+      <td>${g.marks}</td>
+      <td>${g.max_marks} <span class="badge badge-${pct >= 70 ? 'green' : pct >= 50 ? 'yellow' : 'red'}" style="margin-left:6px">${pct}%</span></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="4"><div class="empty-state"><span class="es-icon">▤</span>No exam results yet.</div></td></tr>';
 
   document.getElementById('quizGradeRows').innerHTML = grades.quizGrades.length ? grades.quizGrades.map(g => {
     const pct = Math.round((g.score / g.total) * 100);

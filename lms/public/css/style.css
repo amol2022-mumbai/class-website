@@ -404,6 +404,21 @@ td .muted { color: var(--text-muted); font-size: 13px; }
 .progress { height: 8px; background: var(--bg-elevated); border-radius: 10px; overflow: hidden; min-width: 100px; }
 .progress-bar { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 10px; }
 
+/* Timetable week grid */
+.timetable-grid { border-collapse: collapse; width: 100%; min-width: 760px; }
+.timetable-grid th, .timetable-grid td { border: 1px solid var(--border); padding: 10px; text-align: left; vertical-align: top; }
+.timetable-grid th { background: var(--bg-elevated); font-size: 12px; letter-spacing: 0.5px; }
+.timetable-grid .tt-time-col { width: 90px; font-size: 13px; }
+.tt-cell { background: var(--cyan-dim); border: 1px solid var(--cyan); border-radius: 6px; padding: 8px; margin-bottom: 6px; }
+.tt-cell .tt-subject { font-weight: 700; font-size: 13px; }
+.tt-cell .tt-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* Markbook */
+.markbook-table { border-collapse: collapse; width: 100%; min-width: 900px; }
+.markbook-table th, .markbook-table td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+.markbook-table th { background: var(--bg-elevated); font-size: 12px; white-space: nowrap; }
+.markbook-table th .muted { font-weight: 400; font-size: 11px; }
+
 /* Attendance grid */
 .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .att-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }

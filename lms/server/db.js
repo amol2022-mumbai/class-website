@@ -447,6 +447,18 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS lesson_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+    syllabus_id INTEGER REFERENCES syllabus(id) ON DELETE SET NULL,
+    topic TEXT NOT NULL,
+    notes TEXT,
+    lesson_date TEXT DEFAULT (date('now')),
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS inventory_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
@@ -1068,6 +1080,33 @@ function seedModules() {
     ];
     for (const [ci, week, topic, desc, obj, status] of sData) {
       insertSyllabus.run(courseIds[ci], week, topic, desc, obj, status);
+    }
+  }
+
+  // ---- Lesson logs / lecture records demo ----
+  if (count('lesson_logs') === 0) {
+    const insertLesson = db.prepare(
+      'INSERT INTO lesson_logs (course_id, batch_id, syllabus_id, topic, notes, lesson_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const facByUser = {};
+    for (const u of ['FAC001', 'FAC002', 'FAC003']) {
+      const r = db.prepare('SELECT id FROM users WHERE username = ?').get(u);
+      if (r) facByUser[u] = r.id;
+    }
+    const syRows = db.prepare('SELECT id, course_id FROM syllabus ORDER BY id').all();
+    const syByCourse = {};
+    for (const sy of syRows) syByCourse[sy.course_id] = syByCourse[sy.course_id] || [];
+    for (const sy of syRows) syByCourse[sy.course_id].push(sy.id);
+    const lessons = [
+      [0, 0, 'FAC001', 'Python Basics', 'Covered variables, data types and the print function.', '2026-07-14'],
+      [0, 0, 'FAC001', 'Control Flow', 'Worked through if/else and loop exercises in class.', '2026-07-16'],
+      [1, 1, 'FAC002', 'HTML5 Fundamentals', 'Built a small personal-page document with forms.', '2026-07-15'],
+      [2, 2, 'FAC003', 'Intro to ML', 'Discussed supervised vs unsupervised learning with examples.', '2026-07-17'],
+    ];
+    for (const [ci, bi, fu, topic, notes, date] of lessons) {
+      const cid = courseIds[ci];
+      const sy = syByCourse[cid] ? syByCourse[cid][0] : null;
+      insertLesson.run(cid, batchIds[bi], sy, topic, notes, date, facByUser[fu] || null);
     }
   }
 

@@ -940,11 +940,51 @@ app.get('/api/student/grades', requireStudent, (req, res) => {
     WHERE qa.student_id = ?
   `).all(req.session.user.id);
 
+  const examGrades = db.prepare(`
+    SELECT x.title, x.max_marks, r.marks, c.title AS course_title, c.code AS course_code
+    FROM exam_results r
+    JOIN exams x ON x.id = r.exam_id
+    JOIN courses c ON c.id = x.course_id
+    WHERE r.student_id = ?
+  `).all(req.session.user.id);
+
   const attendanceSummary = db.prepare(`
     SELECT status, COUNT(*) AS count FROM attendance WHERE student_id = ? GROUP BY status
   `).all(req.session.user.id);
 
-  res.json({ assignmentGrades, quizGrades, attendanceSummary });
+  const attTotal = attendanceSummary.reduce((s, a) => s + a.count, 0);
+  const attPresent = attendanceSummary.filter(a => a.status === 'present' || a.status === 'late').reduce((s, a) => s + a.count, 0);
+  const attendancePct = attTotal ? Math.round((attPresent / attTotal) * 100) : null;
+
+  // Per-course aggregate with a weighted GPA.
+  const gradeLetter = (pct) => pct >= 90 ? 'A' : pct >= 80 ? 'B' : pct >= 70 ? 'C' : pct >= 60 ? 'D' : pct >= 50 ? 'E' : 'F';
+  const gpaFromPct = (pct) => pct >= 90 ? 4.0 : pct >= 80 ? 3.7 : pct >= 70 ? 3.0 : pct >= 60 ? 2.3 : pct >= 50 ? 1.7 : 0.0;
+
+  const byCourse = {};
+  for (const g of assignmentGrades) {
+    byCourse[g.course_code] = byCourse[g.course_code] || { course_code: g.course_code, course_title: g.course_title, aTotal: 0, aMax: 0, eTotal: 0, eMax: 0, hasA: false, hasE: false };
+    byCourse[g.course_code].aTotal += g.score;
+    byCourse[g.course_code].aMax += g.max_score;
+    byCourse[g.course_code].hasA = true;
+  }
+  for (const g of examGrades) {
+    byCourse[g.course_code] = byCourse[g.course_code] || { course_code: g.course_code, course_title: g.course_title, aTotal: 0, aMax: 0, eTotal: 0, eMax: 0, hasA: false, hasE: false };
+    byCourse[g.course_code].eTotal += g.marks;
+    byCourse[g.course_code].eMax += g.max_marks;
+    byCourse[g.course_code].hasE = true;
+  }
+  const courseSummary = Object.values(byCourse).map(c => {
+    const aPct = c.hasA && c.aMax ? Math.round((c.aTotal / c.aMax) * 100) : null;
+    const ePct = c.hasE && c.eMax ? Math.round((c.eTotal / c.eMax) * 100) : null;
+    let w = 0, agg = 0;
+    if (aPct != null) { agg += aPct * 0.4; w += 0.4; }
+    if (ePct != null) { agg += ePct * 0.4; w += 0.4; }
+    if (attendancePct != null) { agg += attendancePct * 0.2; w += 0.2; }
+    const overall = w ? Math.round(agg / w) : null;
+    return { ...c, assignment_pct: aPct, exam_pct: ePct, overall_pct: overall, grade: overall != null ? gradeLetter(overall) : '—', gpa: overall != null ? gpaFromPct(overall).toFixed(2) : '—' };
+  }).sort((a, b) => a.course_code.localeCompare(b.course_code));
+
+  res.json({ assignmentGrades, quizGrades, examGrades, attendancePct, courseSummary });
 });
 
 // =====================================================================
@@ -1579,6 +1619,31 @@ app.get('/api/student/timetable', requireStudent, (req, res) => {
   `).all(req.session.user.id));
 });
 
+// Student: lesson history for enrolled courses (groups by course).
+app.get('/api/student/lessons', requireStudent, (req, res) => {
+  const rows = db.prepare(`
+    SELECT l.*, c.code AS course_code, c.title AS course_title, b.name AS batch_name,
+      sy.topic AS syllabus_topic, sy.week_no AS syllabus_week,
+      u.name AS faculty_name
+    FROM lesson_logs l
+    JOIN enrollments e ON e.course_id = l.course_id AND e.student_id = ?
+    JOIN courses c ON c.id = l.course_id
+    LEFT JOIN batches b ON b.id = l.batch_id
+    LEFT JOIN syllabus sy ON sy.id = l.syllabus_id
+    LEFT JOIN users u ON u.id = l.created_by
+    ORDER BY l.lesson_date DESC, l.id DESC
+  `).all(req.session.user.id);
+  const grouped = {};
+  for (const r of rows) {
+    const key = r.course_id;
+    if (!grouped[key]) {
+      grouped[key] = { course_id: r.course_id, course_code: r.course_code, course_title: r.course_title, lessons: [] };
+    }
+    grouped[key].lessons.push(r);
+  }
+  res.json(Object.values(grouped));
+});
+
 app.get('/api/student/exams', requireStudent, (req, res) => {
   const nowIso = new Date().toISOString();
   const rows = db.prepare(`
@@ -1831,6 +1896,55 @@ app.delete('/api/faculty/syllabus/:id', requireFaculty, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Faculty: lesson log / lecture records ----------
+// Lesson logs are lecture records tied to a course (and optionally a batch +
+// syllabus row). Each new lesson auto-advances the linked syllabus row from
+// 'planned'/'in-progress' to 'completed', turning the syllabus into a live
+// progress tracker.
+app.get('/api/faculty/lessons', requireFaculty, (req, res) => {
+  const rows = db.prepare(`
+    SELECT l.*, c.code AS course_code, c.title AS course_title, b.name AS batch_name,
+      sy.topic AS syllabus_topic
+    FROM lesson_logs l
+    JOIN courses c ON c.id = l.course_id
+    JOIN faculty_courses fc ON fc.course_id = l.course_id
+    LEFT JOIN batches b ON b.id = l.batch_id
+    LEFT JOIN syllabus sy ON sy.id = l.syllabus_id
+    WHERE fc.faculty_id = ? ORDER BY l.lesson_date DESC, l.id DESC
+  `).all(req.session.user.id);
+  res.json(rows);
+});
+
+app.post('/api/faculty/lessons', requireFaculty, (req, res) => {
+  const { course_id, batch_id, syllabus_id, topic, notes, lesson_date } = req.body || {};
+  if (!course_id || !topic) return res.status(400).json({ error: 'Course and topic are required' });
+  const owns = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, course_id);
+  if (!owns) return res.status(403).json({ error: 'You do not teach this course' });
+  if (syllabus_id) {
+    const sy = db.prepare('SELECT id FROM syllabus WHERE id = ? AND course_id = ?').get(syllabus_id, course_id);
+    if (!sy) return res.status(400).json({ error: 'Syllabus row does not belong to this course' });
+  }
+  const result = db.prepare(`
+    INSERT INTO lesson_logs (course_id, batch_id, syllabus_id, topic, notes, lesson_date, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(course_id, batch_id || null, syllabus_id || null, topic, notes || '', lesson_date || new Date().toISOString().slice(0, 10), req.session.user.id);
+  if (syllabus_id) {
+    db.prepare("UPDATE syllabus SET status = 'completed' WHERE id = ? AND status != 'completed'").run(syllabus_id);
+  }
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+app.delete('/api/faculty/lessons/:id', requireFaculty, (req, res) => {
+  const item = db.prepare('SELECT * FROM lesson_logs WHERE id = ?').get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Lesson not found' });
+  const owns = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, item.course_id);
+  if (!owns) return res.status(403).json({ error: 'You do not teach this course' });
+  db.prepare('DELETE FROM lesson_logs WHERE id = ?').run(item.id);
+  res.json({ ok: true });
+});
+
 app.get('/api/faculty/timetable', requireFaculty, (req, res) => {
   res.json(db.prepare(`
     SELECT t.*, b.name AS batch_name, c.code AS course_code
@@ -1854,6 +1968,86 @@ app.get('/api/faculty/courses/:id/students', requireFaculty, (req, res) => {
     FROM enrollments e JOIN users u ON u.id = e.student_id
     WHERE e.course_id = ? ORDER BY u.name
   `).all(req.params.id, req.params.id));
+});
+
+// Markbook / gradebook for one course: every student's assignment + exam scores
+// + attendance %, a computed term GPA and a letter grade.
+app.get('/api/faculty/courses/:id/markbook', requireFaculty, (req, res) => {
+  const courseId = Number(req.params.id);
+  const owned = db.prepare('SELECT id FROM faculty_courses WHERE faculty_id = ? AND course_id = ?')
+    .get(req.session.user.id, courseId);
+  if (!owned) return res.status(403).json({ error: 'Not assigned to this course' });
+
+  const course = db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId);
+  const assignments = db.prepare('SELECT id, title, max_score FROM assignments WHERE course_id = ? ORDER BY id').all(courseId);
+  const exams = db.prepare('SELECT id, title, max_marks FROM exams WHERE course_id = ? ORDER BY id').all(courseId);
+  const students = db.prepare(`
+    SELECT u.id, u.username, u.name FROM enrollments e JOIN users u ON u.id = e.student_id
+    WHERE e.course_id = ? ORDER BY u.name
+  `).all(courseId);
+
+  const getAssignmentScores = db.prepare(`
+    SELECT s.assignment_id, s.score FROM submissions s
+    JOIN assignments a ON a.id = s.assignment_id
+    WHERE s.student_id = ? AND a.course_id = ?
+  `);
+  const getExamScores = db.prepare('SELECT exam_id, marks FROM exam_results WHERE student_id = ? AND exam_id IN (SELECT id FROM exams WHERE course_id = ?)');
+  const getAttendance = db.prepare(`
+    SELECT status, COUNT(*) AS c FROM attendance WHERE student_id = ? AND course_id = ? GROUP BY status
+  `);
+
+  const gradeLetter = (pct) => pct >= 90 ? 'A' : pct >= 80 ? 'B' : pct >= 70 ? 'C' : pct >= 60 ? 'D' : pct >= 50 ? 'E' : 'F';
+  const gpaFromPct = (pct) => pct >= 90 ? 4.0 : pct >= 80 ? 3.7 : pct >= 70 ? 3.0 : pct >= 60 ? 2.3 : pct >= 50 ? 1.7 : 0.0;
+
+  const rows = students.map(s => {
+    const assignmentScores = getAssignmentScores.all(s.id, courseId);
+    const assignmentMap = {};
+    let assignmentPct = null;
+    const graded = assignmentScores.filter(a => a.score != null);
+    if (graded.length) {
+      const total = graded.reduce((sum, a) => sum + a.score, 0);
+      const max = graded.reduce((sum, a) => {
+        const as = assignments.find(x => x.id === a.assignment_id);
+        return sum + (as ? as.max_score : 0);
+      }, 0);
+      assignmentPct = max ? Math.round((total / max) * 100) : 0;
+      graded.forEach(a => { assignmentMap[a.assignment_id] = a.score; });
+    }
+    const examScores = getExamScores.all(s.id, courseId);
+    const examMap = {};
+    let examPct = null;
+    if (examScores.length) {
+      const total = examScores.reduce((sum, e) => sum + e.marks, 0);
+      const max = examScores.reduce((sum, e) => {
+        const ex = exams.find(x => x.id === e.exam_id);
+        return sum + (ex ? ex.max_marks : 0);
+      }, 0);
+      examPct = max ? Math.round((total / max) * 100) : 0;
+      examScores.forEach(e => { examMap[e.exam_id] = e.marks; });
+    }
+    const att = getAttendance.all(s.id, courseId);
+    const attTotal = att.reduce((sum, a) => sum + a.c, 0);
+    const attPresent = att.filter(a => a.status === 'present' || a.status === 'late').reduce((sum, a) => sum + a.c, 0);
+    const attendancePct = attTotal ? Math.round((attPresent / attTotal) * 100) : null;
+
+    // Term GPA: 40% assignments, 40% exams, 20% attendance (only weighted on components that exist).
+    let weightTotal = 0, gpa = null;
+    if (assignmentPct != null) { gpa = (gpa || 0) + assignmentPct * 0.4; weightTotal += 0.4; }
+    if (examPct != null) { gpa = (gpa || 0) + examPct * 0.4; weightTotal += 0.4; }
+    if (attendancePct != null) { gpa = (gpa || 0) + attendancePct * 0.2; weightTotal += 0.2; }
+    const overallPct = weightTotal ? Math.round(gpa / weightTotal) : null;
+
+    return {
+      id: s.id, username: s.username, name: s.name,
+      assignment_scores: assignmentMap, exam_scores: examMap,
+      assignment_pct: assignmentPct, exam_pct: examPct, attendance_pct: attendancePct,
+      overall_pct: overallPct,
+      grade: overallPct != null ? gradeLetter(overallPct) : '—',
+      gpa: overallPct != null ? gpaFromPct(overallPct).toFixed(2) : '—',
+    };
+  });
+
+  res.json({ course, assignments, exams, students: rows });
 });
 
 app.post('/api/faculty/attendance', requireFaculty, (req, res) => {
