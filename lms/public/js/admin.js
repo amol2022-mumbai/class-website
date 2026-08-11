@@ -394,6 +394,7 @@ async function loadStudents() {
 
 function openStudentModal(student) {
   const isEdit = !!student;
+  window._removePhoto = false;
   showModal(isEdit ? 'Edit Student' : 'Add Student', `
     <form id="studentForm">
       <div class="form-grid">
@@ -487,22 +488,21 @@ function openStudentModal(student) {
     };
     const photoInput = document.getElementById('studentPhotoInput');
     try {
-      await fileToBase64(photoInput && photoInput.files[0], async (photo) => {
-        if (photo) { payload.photo_data = photo.data; payload.photo_name = photo.name; }
-        if (isEdit) {
-          if (window._removePhoto) payload.remove_photo = true;
-          if (f.get('password')) payload.password = f.get('password');
-          await api('/api/admin/students/' + student.id, { method: 'PUT', body: payload });
-        } else {
-          await api('/api/admin/students', { method: 'POST', body: {
-            username: f.get('username'), password: f.get('password'),
-            ...payload,
-          }});
-        }
-        toast(isEdit ? 'Student updated' : 'Student created');
-        closeModal();
-        loadStudents();
-      });
+      const photo = await fileToBase64(photoInput && photoInput.files[0]);
+      if (photo) { payload.photo_data = 'data:' + (photo.type || 'image/jpeg') + ';base64,' + photo.data; payload.photo_name = photo.name; }
+      if (isEdit) {
+        if (window._removePhoto) payload.remove_photo = true;
+        if (f.get('password')) payload.password = f.get('password');
+        await api('/api/admin/students/' + student.id, { method: 'PUT', body: payload });
+      } else {
+        await api('/api/admin/students', { method: 'POST', body: {
+          username: f.get('username'), password: f.get('password'),
+          ...payload,
+        }});
+      }
+      toast(isEdit ? 'Student updated' : 'Student created');
+      closeModal();
+      loadStudents();
     } catch (err) { toast(err.message, true); }
   });
 

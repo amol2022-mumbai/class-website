@@ -105,12 +105,19 @@ function downloadFromB64(name, base64) {
 }
 
 // Read a file input and resolve with { name, data } where data is base64.
+// Returns a Promise, but also supports the legacy callback form.
 function fileToBase64(file, cb) {
-  if (!file) return cb(null);
-  const reader = new FileReader();
-  reader.onload = () => cb({ name: file.name, data: String(reader.result).split(',')[1] || '' });
-  reader.onerror = () => cb(null);
-  reader.readAsDataURL(file);
+  return new Promise((resolve) => {
+    const done = (photo) => {
+      if (cb) cb(photo);
+      resolve(photo);
+    };
+    if (!file) return done(null);
+    const reader = new FileReader();
+    reader.onload = () => done({ name: file.name, type: file.type || 'image/jpeg', data: String(reader.result).split(',')[1] || '' });
+    reader.onerror = () => done(null);
+    reader.readAsDataURL(file);
+  });
 }
 
 // HTML for a passport-photo image (or fallback initial) used on ID cards.
